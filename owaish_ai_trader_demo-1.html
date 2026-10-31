@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OWAISH AI TRADER — Demo</title>
+<style>
+:root{--bg:#0b1220;--panel:#121d30;--line:#26364f;--muted:#9aabc3;--text:#edf4ff;--green:#2bd39b;--red:#ff6878;--blue:#78aaff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:900px;margin:auto;padding:18px}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+h1{font-size:21px;margin:0}.sub,.muted{color:var(--muted);font-size:13px}.pill{border:1px solid #286b59;color:var(--green);border-radius:99px;padding:6px 10px;font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:18px 0}.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:15px}
+.metric{font-size:25px;font-weight:700;margin-top:5px}.label{color:var(--muted);font-size:12px}
+.controls{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}button,select{border:1px solid var(--line);background:#1a2a43;color:var(--text);border-radius:10px;padding:11px 14px;font-size:14px}
+button.primary{background:#245bba;border-color:#3979df}button.stop{background:#522431;border-color:#88404e}button:disabled{opacity:.45}
+.signal{font-size:20px;font-weight:700;margin:8px 0}.green{color:var(--green)}.red{color:var(--red)}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;padding:10px 5px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:500}
+.notice{border:1px solid #775f2b;background:#2c2618;color:#f5d995;padding:12px;border-radius:12px;font-size:13px;line-height:1.5}
+canvas{width:100%;height:190px;display:block}.foot{font-size:12px;color:var(--muted);line-height:1.5;margin:18px 0}
+@media(min-width:650px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+</style>
+</head>
+<body><main>
+<div class="top"><div><h1>OWAISH AI TRADER</h1><div class="sub">Android-friendly prototype · simulated account</div></div><span class="pill">● DEMO ONLY</span></div>
+<div class="notice" style="margin-top:16px"><b>Simulation only:</b> This prototype does not connect to BtcDana, MT5, live prices, or a broker. All prices and trades are generated locally for testing the dashboard. No real orders can be placed.</div>
+<div class="grid">
+ <div class="card"><div class="label">Virtual balance</div><div class="metric" id="balance">₹5,000.00</div></div>
+ <div class="card"><div class="label">Simulated equity</div><div class="metric" id="equity">₹5,000.00</div></div>
+ <div class="card"><div class="label">Closed P/L</div><div class="metric" id="pnl">₹0.00</div></div>
+ <div class="card"><div class="label">Open positions</div><div class="metric" id="open">0</div></div>
+</div>
+<div class="grid" style="grid-template-columns:1fr">
+ <section class="card">
+  <div class="top"><div><div class="label">Simulated market</div><div style="font-size:20px;font-weight:700">EUR/USD <span class="muted" style="font-size:12px">· mock feed</span></div></div><div id="price" class="metric">1.08500</div></div>
+  <canvas id="chart" width="850" height="190"></canvas>
+  <div class="top"><div><div class="label">Strategy signal (illustrative)</div><div id="signal" class="signal">WAIT</div></div><div><div class="label">RSI (mock)</div><div id="rsi" class="metric">50.0</div></div><div><div class="label">MACD (mock)</div><div id="macd" class="metric">0.0000</div></div></div>
+  <div class="controls"><button class="primary" id="start">Start simulation</button><button id="pause" disabled>Pause</button><button class="stop" id="reset">Reset demo</button></div>
+ </section>
+ <section class="card">
+  <div class="top"><b>Risk controls</b><span class="muted">Demo settings</span></div>
+  <div class="grid" style="margin:12px 0">
+   <div><div class="label">Virtual starting balance</div><select id="capital"><option value="1000">₹1,000</option><option value="2500">₹2,500</option><option value="5000" selected>₹5,000</option></select></div>
+   <div><div class="label">Risk per simulated trade</div><select id="risk"><option value="0.005">0.5%</option><option value="0.01" selected>1%</option></select></div>
+   <div><div class="label">Max daily loss</div><select id="daily"><option value="0.02">2%</option><option value="0.03" selected>3%</option></select></div>
+   <div><div class="label">Position limit</div><select id="limit"><option>1</option><option selected>2</option></select></div>
+  </div>
+  <div class="muted">The simulator uses placeholder indicators and simplified position sizing. These are not validated trading signals or a prediction of returns.</div>
+ </section>
+ <section class="card"><b>Trade history</b><div style="overflow-x:auto"><table><thead><tr><th>Time</th><th>Side</th><th>Entry</th><th>Exit</th><th>P/L</th></tr></thead><tbody id="history"><tr><td colspan="5" class="muted">No simulated trades yet.</td></tr></tbody></table></div></section>
+</div>
+<div class="foot">Build stage 1: user-interface and paper-trading simulation only. Broker execution requires verified API/MT5 connectivity, secure server-side credentials, regulatory checks, and extensive demo testing. Never enter broker passwords, OTPs, or API secrets into this prototype.</div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let balance=5000, price=1.085, prices=[], running=false, timer=null, positions=[], history=[], closedPnl=0, dayLoss=0, ticks=0;
+function fmtINR(n){return '₹'+n.toFixed(2)}
+function indicators(){
+ let diffs=prices.slice(1).map((v,i)=>v-prices[i]);
+ let up=diffs.filter(x=>x>0).reduce((a,b)=>a+b,0),dn=-diffs.filter(x=>x<0).reduce((a,b)=>a+b,0);
+ let rsi=diffs.length?(dn===0?70:100-100/(1+(up/(dn||1e-9)))):50;
+ let fast=prices.slice(-5).reduce((a,b)=>a+b,0)/Math.min(5,prices.length);
+ let slow=prices.slice(-12).reduce((a,b)=>a+b,0)/Math.min(12,prices.length);
+ return {rsi,macd:fast-slow};
+}
+function update(){
+ let move=(Math.random()-.495)*.00065; price=Math.max(1.07,Math.min(1.10,price+move)); prices.push(price); if(prices.length>40)prices.shift();
+ ticks++; let {rsi,macd}=indicators();
+ $('price').textContent=price.toFixed(5); $('rsi').textContent=rsi.toFixed(1); $('macd').textContent=macd.toFixed(5);
+ let signal=(rsi<35&&macd>0)?'BUY':(rsi>65&&macd<0)?'SELL':'WAIT';
+ $('signal').textContent=signal; $('signal').className='signal '+(signal==='BUY'?'green':signal==='SELL'?'red':'');
+ managePositions();
+ let dailyLimit=Number($('daily').value)*Number($('capital').value);
+ if(dayLoss>=dailyLimit){stop();$('signal').textContent='DAILY LIMIT — PAUSED';}
+ if(signal!=='WAIT'&&positions.length<Number($('limit').value)&&ticks%5===0&&dayLoss<dailyLimit)openPosition(signal);
+ render(); draw();
+}
+function openPosition(side){
+ const risk=Number($('capital').value)*Number($('risk').value);
+ positions.push({side,entry:price,stop:side==='BUY'?price-.0008:price+.0008,target:side==='BUY'?price+.0012:price-.0012,risk,at:new Date().toLocaleTimeString()});
+}
+function managePositions(){
+ positions=positions.filter(p=>{
+  let hit=p.side==='BUY'?(price<=p.stop||price>=p.target):(price>=p.stop||price<=p.target);
+  if(!hit)return true;
+  let win=p.side==='BUY'?price>p.entry:price<p.entry;
+  let pl=win?p.risk*1.5:-p.risk; balance+=pl; closedPnl+=pl;if(pl<0)dayLoss+=-pl;
+  history.unshift({time:new Date().toLocaleTimeString(),side:p.side,entry:p.entry,exit:price,pl});history=history.slice(0,12);return false;
+ });
+}
+function render(){
+ let floating=positions.reduce((s,p)=>s+(p.side==='BUY'?(price-p.entry):(p.entry-price))*10000,0);
+ $('balance').textContent=fmtINR(balance);$('equity').textContent=fmtINR(balance+floating);$('pnl').textContent=fmtINR(closedPnl);$('open').textContent=positions.length;
+ $('pnl').className='metric '+(closedPnl>=0?'green':'red');
+ $('history').innerHTML=history.length?history.map(h=>`<tr><td>${h.time}</td><td class="${h.side==='BUY'?'green':'red'}">${h.side}</td><td>${h.entry.toFixed(5)}</td><td>${h.exit.toFixed(5)}</td><td class="${h.pl>=0?'green':'red'}">${fmtINR(h.pl)}</td></tr>`).join(''):'<tr><td colspan="5" class="muted">No simulated trades yet.</td></tr>';
+}
+function draw(){let c=$('chart'),ctx=c.getContext('2d'),w=c.width,h=c.height;ctx.clearRect(0,0,w,h);ctx.strokeStyle='#26364f';ctx.lineWidth=1;for(let y=25;y<h;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke()}if(prices.length<2)return;let min=Math.min(...prices),max=Math.max(...prices),range=max-min||.0001;ctx.strokeStyle='#78aaff';ctx.lineWidth=3;ctx.beginPath();prices.forEach((p,i)=>{let x=i/(prices.length-1)*w,y=h-15-(p-min)/range*(h-30);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke()}
+function start(){if(running)return;running=true;$('start').disabled=true;$('pause').disabled=false;timer=setInterval(update,1200)}
+function stop(){running=false;clearInterval(timer);$('start').disabled=false;$('pause').disabled=true}
+function reset(){stop();balance=Number($('capital').value);price=1.085;prices=[];positions=[];history=[];closedPnl=0;dayLoss=0;ticks=0;render();$('price').textContent=price.toFixed(5);$('signal').textContent='WAIT';$('rsi').textContent='50.0';$('macd').textContent='0.0000';draw()}
+$('start').onclick=start;$('pause').onclick=stop;$('reset').onclick=reset;$('capital').onchange=reset;reset();
+</script></body></html>
