@@ -89,7 +89,7 @@ def analyse_market(symbol):
 
     fast = ema(prices, 12)
     slow = ema(prices, 26)
-    offset = len(prices) - len(slow)
+    offset = 14
     macd_line = [
         fast[i + offset] - slow[i]
         for i in range(len(slow))
