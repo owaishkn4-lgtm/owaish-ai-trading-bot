@@ -205,20 +205,20 @@ def scan():
             "mode": "DEMO_ONLY",
             "markets": cache["results"]
         })
-
     results = []
 
     for symbol in MARKETS:
         try:
             results.append(analyse_market(symbol))
-               except Exception as e:
+        except Exception as e:
             results.append({
                 "symbol": symbol,
                 "status": "error",
                 "message": str(e)
-            }) 
+            })
 
     cache["time"] = time.time()
+    
     cache["results"] = results
 
     return jsonify({
