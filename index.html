@@ -99,6 +99,94 @@ function stop(){running=false;clearInterval(timer);$('start').disabled=false;$('
 function reset(){stop();balance=Number($('capital').value);price=1.085;prices=[];positions=[];history=[];closedPnl=0;dayLoss=0;ticks=0;render();$('price').textContent=price.toFixed(5);$('signal').textContent='WAIT';$('rsi').textContent='50.0';$('macd').textContent='0.0000';draw()}
 $('start').onclick=start;$('pause').onclick=stop;$('reset').onclick=reset;$('capital').onchange=reset;reset();
 </script>
+ 
+<!-- REAL LIVE CANDLE CHART -->
+<section class="card" style="margin:20px 0;background:#121d30;color:white;padding:16px;border-radius:14px">
+  <h2>📊 Live Market Chart</h2>
+
+  <select id="chart-symbol">
+    <option value="EUR/USD">EUR/USD</option>
+    <option value="GBP/USD">GBP/USD</option>
+    <option value="USD/JPY">USD/JPY</option>
+    <option value="XAU/USD">Gold (XAU/USD)</option>
+    <option value="BTC/USD">Bitcoin (BTC/USD)</option>
+    <option value="ETH/USD">Ethereum (ETH/USD)</option>
+  </select>
+
+  <p id="chart-status">Loading candles...</p>
+  <div id="live-candles" style="height:350px;width:100%"></div>
+</section>
+
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+const chartElement = document.getElementById('live-candles');
+
+const liveChart = LightweightCharts.createChart(chartElement, {
+  width: chartElement.clientWidth,
+  height: 350,
+  layout: {
+    background: { color: '#121d30' },
+    textColor: '#edf4ff'
+  },
+  grid: {
+    vertLines: { color: '#26364f' },
+    horzLines: { color: '#26364f' }
+  },
+  timeScale: { timeVisible: true, secondsVisible: false }
+});
+
+const candleSeries = liveChart.addSeries(
+  LightweightCharts.CandlestickSeries,
+  {
+    upColor: '#2bd39b',
+    downColor: '#ff6878',
+    borderVisible: false,
+    wickUpColor: '#2bd39b',
+    wickDownColor: '#ff6878'
+  }
+);
+
+async function loadLiveCandles() {
+  const symbol = document.getElementById('chart-symbol').value;
+  const status = document.getElementById('chart-status');
+
+  try {
+    status.textContent = 'Fetching live candles...';
+
+    const url = 'https://owaish-ai-trading-api.onrender.com/api/candles?symbol='
+      + encodeURIComponent(symbol);
+
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('API error');
+
+    const data = await response.json();
+
+    const candles = data.candles.map(c => ({
+      time: Math.floor(new Date(c.time.replace(' ', 'T') + '+00:00').getTime() / 1000),
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close
+    }));
+
+    candleSeries.setData(candles);
+    liveChart.timeScale().fitContent();
+    status.textContent = symbol + ' · 5-minute candles · ' + candles.length + ' bars';
+  } catch (error) {
+    status.textContent = 'Chart unavailable. Please retry.';
+  }
+}
+
+document.getElementById('chart-symbol').addEventListener('change', loadLiveCandles);
+
+loadLiveCandles();
+setInterval(loadLiveCandles, 300000);
+
+window.addEventListener('resize', () => {
+  liveChart.applyOptions({ width: chartElement.clientWidth });
+});
+</script>
+
 <!-- OWAISH AI TRADER LIVE ANALYSIS -->
 <section style="background:#111827;color:white;padding:20px;margin:20px;border-radius:14px;font-family:Arial">
   <h2>🚀 OWAISH AI TRADER</h2>
