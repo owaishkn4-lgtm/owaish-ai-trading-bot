@@ -128,6 +128,8 @@ async function loadMarketPrices() {
         <p>RSI: ${m.rsi ?? "N/A"}</p>
         <p>MACD: ${m.macd ?? "N/A"}</p>
         <p>Signal: <strong style="color:${m.signal === "BUY" ? "#22c55e" : m.signal === "SELL" ? "#ef4444" : "#facc15"}">${m.signal ?? "WAIT"}</strong></p>
+        <p>Reason: ${m.reason ?? "Not available"}</p>
+<p>Confidence: ${m.confidence ?? "Not calculated"} </p>
       </div>
     `).join("");
 
