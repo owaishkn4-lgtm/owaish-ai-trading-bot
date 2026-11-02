@@ -14,6 +14,41 @@ def get_db_connection():
         cursor_factory=RealDictCursor,
         connect_timeout=10
     )
+def init_db():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            email VARCHAR(255) UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS trades (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            symbol VARCHAR(30) NOT NULL,
+            side VARCHAR(10) NOT NULL,
+            entry_price DOUBLE PRECISION,
+            stop_loss DOUBLE PRECISION,
+            target DOUBLE PRECISION,
+            quantity DOUBLE PRECISION,
+            status VARCHAR(20) DEFAULT 'OPEN',
+            entry_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            exit_price DOUBLE PRECISION,
+            exit_time TIMESTAMPTZ,
+            pnl DOUBLE PRECISION DEFAULT 0
+        )
+    """)
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    print("Database tables ready!")
 @app.after_request
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
