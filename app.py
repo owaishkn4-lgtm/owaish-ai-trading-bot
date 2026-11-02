@@ -101,7 +101,15 @@ def analyse_market(symbol):
 
     macd = macd_line[-1]
     signal = signal_line[-1]
+    macd_direction = 1 if macd > signal else -1 if mac < signal else 0
+    rsi_direction = 1 if rsi > 50 else -1 if rsi < 50 else 0
 
+    if macd_direction == 0 or rsi_direction == 0:
+        agreement_score = 50
+    elif macd_direction == rsi_direction:
+        agreement_score = 100
+    else:
+        agreement_score = 0
     if macd > signal and 50 < rsi < 70:
         trade_signal = "BUY"
     elif macd < signal and 30 < rsi < 50:
@@ -122,6 +130,7 @@ def analyse_market(symbol):
         "macd_signal": round(signal, 6),
         "signal": trade_signal,
         "reason": reason, 
+        "agreement_score": agreement_score,
         "status": "success"
     }
 
