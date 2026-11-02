@@ -104,15 +104,10 @@ prices = candles
 price=Number(candle.close);
 if(!Number.isFinite(price))throw new Error('Invalid price');
 
-if(!newCandle){
- $('price').textContent=price.toFixed(priceDigits());
- draw();
- return;
+if(newCandle){
+ lastCandleTime=candle.time;
+ ticks++;
 }
-
-lastCandleTime=candle.time;
-ticks++; 
-
   const {rsi,macd}=indicators();
   $('price').textContent=price.toFixed(priceDigits());
   $('rsi').textContent=rsi.toFixed(1);
@@ -142,7 +137,7 @@ $('signal').className='signal '+(
   if(dayLoss>=dailyLimit){
    stop();
    $('signal').textContent='DAILY LIMIT — PAUSED';
-  }else if(signal!=='WAIT' && signal!==lastTradeSignal && positions.length<Number($('limit').value)){
+  }else if(running && signal!=='WAIT' && signal!==lastTradeSignal && positions.length<Number($('limit').value)){
    openPosition(signal);
    lastTradeSignal=signal;
   }else if(signal==='WAIT'){
