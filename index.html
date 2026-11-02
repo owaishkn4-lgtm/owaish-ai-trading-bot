@@ -91,15 +91,27 @@ async function update(){
   const data=await response.json();
   if(!data.candles || !data.candles.length)throw new Error('No candle data');
 
-  const candle=data.candles[data.candles.length-1];
-  if(candle.time===lastCandleTime)return;
-  lastCandleTime=candle.time;
-  price=Number(candle.close);
-  if(!Number.isFinite(price))throw new Error('Invalid price');
+ const candles=data.candles;
+const candle=candles[candles.length-1];
 
-  prices.push(price);
-  if(prices.length>40)prices.shift();
-  ticks++;
+const newCandle = candle.time !== lastCandleTime;
+
+prices = candles
+ .map(c=>Number(c.close))
+ .filter(p=>Number.isFinite(p))
+ .slice(-40);
+
+price=Number(candle.close);
+if(!Number.isFinite(price))throw new Error('Invalid price');
+
+if(!newCandle){
+ $('price').textContent=price.toFixed(priceDigits());
+ draw();
+ return;
+}
+
+lastCandleTime=candle.time;
+ticks++; 
 
   const {rsi,macd}=indicators();
   $('price').textContent=price.toFixed(priceDigits());
