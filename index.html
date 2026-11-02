@@ -77,6 +77,60 @@ let balance=5000, price=1.085, prices=[], running=false, timer=null;
 let positions=[], history=[], closedPnl=0, dayLoss=0, ticks=0;
 let marketSymbol='EUR/USD', lastCandleTime=null, fetching=false;
 let lastTradeSignal='WAIT';
+ 
+const STORAGE_KEY = 'owaish_ai_trader_demo_v1';
+
+function saveState(){
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      balance, price, prices, positions, history,
+      closedPnl, dayLoss, ticks, marketSymbol,
+      lastCandleTime, lastTradeSignal,
+      capital: $('capital').value,
+      risk: $('risk').value,
+      daily: $('daily').value,
+      limit: $('limit').value
+    }));
+  } catch(error) {
+    console.error('Save error:', error);
+  }
+}
+
+function restoreState(){
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+
+    if(saved){
+      if(Number.isFinite(saved.balance)) balance = saved.balance;
+      if(Number.isFinite(saved.price)) price = saved.price;
+      if(Array.isArray(saved.prices)) prices = saved.prices;
+      if(Array.isArray(saved.positions)) positions = saved.positions;
+      if(Array.isArray(saved.history)) history = saved.history;
+
+      closedPnl = Number(saved.closedPnl) || 0;
+      dayLoss = Number(saved.dayLoss) || 0;
+      ticks = Number(saved.ticks) || 0;
+      lastCandleTime = saved.lastCandleTime || null;
+      lastTradeSignal = saved.lastTradeSignal || 'WAIT';
+
+      if(saved.marketSymbol){
+        marketSymbol = saved.marketSymbol;
+        $('sim-symbol').value = marketSymbol;
+      }
+
+      if(saved.capital) $('capital').value = saved.capital;
+      if(saved.risk) $('risk').value = saved.risk;
+      if(saved.daily) $('daily').value = saved.daily;
+      if(saved.limit) $('limit').value = saved.limit;
+    }
+  } catch(error) {
+    console.error('Restore error:', error);
+  }
+
+  render();
+  update();
+}
+
 function fmtINR(n){return '₹'+n.toFixed(2)}
 function priceDigits(){return price < 10 ? 5 : 2}
 
@@ -233,6 +287,7 @@ function managePositions(){
  let floating=positions.reduce((s,p)=>{
   let move=p.side==='BUY'?price-p.entry:p.entry-price;
   return s+(move/(p.entry*0.001))*p.risk;
+saveState();
  },0);
 
  let totalPnl=closedPnl+floating;
@@ -321,7 +376,7 @@ $('capital').onchange=reset;
 
 $('sim-symbol').onchange=()=>{
  marketSymbol=$('sim-symbol').value;
- reset();
+ restoreState();
 };
 
 reset();
