@@ -287,7 +287,6 @@ function managePositions(){
  let floating=positions.reduce((s,p)=>{
   let move=p.side==='BUY'?price-p.entry:p.entry-price;
   return s+(move/(p.entry*0.001))*p.risk;
-saveState();
  },0);
 
  let totalPnl=closedPnl+floating;
@@ -319,7 +318,8 @@ saveState();
  $('history').innerHTML=history.length?history.map(h=>
   `<tr><td>${h.time}</td><td class="${h.side==='BUY'?'green':'red'}">${h.side}</td><td>${h.entry.toFixed(priceDigits())}</td><td>${h.exit.toFixed(priceDigits())}</td><td class="${h.pl>=0?'green':'red'}">${fmtINR(h.pl)}</td></tr>`
  ).join(''):'<tr><td colspan="5" class="muted">No simulated trades yet.</td></tr>';
-}
+saveState();
+ }
 
 function draw(){
  let c=$('chart'),ctx=c.getContext('2d'),w=c.width,h=c.height;
