@@ -98,7 +98,8 @@ function start(){if(running)return;running=true;$('start').disabled=true;$('paus
 function stop(){running=false;clearInterval(timer);$('start').disabled=false;$('pause').disabled=true}
 function reset(){stop();balance=Number($('capital').value);price=1.085;prices=[];positions=[];history=[];closedPnl=0;dayLoss=0;ticks=0;render();$('price').textContent=price.toFixed(5);$('signal').textContent='WAIT';$('rsi').textContent='50.0';$('macd').textContent='0.0000';draw()}
 $('start').onclick=start;$('pause').onclick=stop;$('reset').onclick=reset;$('capital').onchange=reset;reset();
-<!-- OWAISH AI TRADER MARKET SCANNER -->
+</script>
+ <!-- OWAISH AI TRADER MARKET SCANNER -->
 <section id="owaish-market-scanner" style="
   background:#111827;
   color:white;
@@ -153,7 +154,6 @@ async function loadMarketPrices() {
 
 loadMarketPrices();
 setInterval(loadMarketPrices, 30000);
-</script>
 </script>
 </body>
 </html>
