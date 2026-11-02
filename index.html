@@ -184,15 +184,17 @@ function managePositions(){
 
 function render(){
  let floating=positions.reduce((s,p)=>{
-  let move=p.side==='BUY'?price-p.entry:p.entry-price;
+  let move=p.side==='BUY'?price-p.entry: p.entry-price;
   return s+(move/(p.entry*0.001))*p.risk;
  },0);
 
+ let totalPnl=closedPnl+floating;
+
  $('balance').textContent=fmtINR(balance);
  $('equity').textContent=fmtINR(balance+floating);
- $('pnl').textContent=fmtINR(closedPnl);
+ $('pnl').textContent=fmtINR(totalPnl);
  $('open').textContent=positions.length;
- $('pnl').className='metric '+(closedPnl>=0?'green':'red');
+ $('pnl').className='metric '+(totalPnl>=0?'green':'red');
 
  $('history').innerHTML=history.length?history.map(h=>
   `<tr><td>${h.time}</td><td class="${h.side==='BUY'?'green':'red'}">${h.side}</td><td>${h.entry.toFixed(priceDigits())}</td><td>${h.exit.toFixed(priceDigits())}</td><td class="${h.pl>=0?'green':'red'}">${fmtINR(h.pl)}</td></tr>`
