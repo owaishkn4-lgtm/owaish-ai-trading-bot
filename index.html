@@ -99,61 +99,47 @@ function stop(){running=false;clearInterval(timer);$('start').disabled=false;$('
 function reset(){stop();balance=Number($('capital').value);price=1.085;prices=[];positions=[];history=[];closedPnl=0;dayLoss=0;ticks=0;render();$('price').textContent=price.toFixed(5);$('signal').textContent='WAIT';$('rsi').textContent='50.0';$('macd').textContent='0.0000';draw()}
 $('start').onclick=start;$('pause').onclick=stop;$('reset').onclick=reset;$('capital').onchange=reset;reset();
 </script>
- <!-- OWAISH AI TRADER MARKET SCANNER -->
-<section id="owaish-market-scanner" style="
-  background:#111827;
-  color:white;
-  padding:20px;
-  margin:20px;
-  border-radius:14px;
-  font-family:Arial,sans-serif;
-">
+<!-- OWAISH AI TRADER LIVE ANALYSIS -->
+<section style="background:#111827;color:white;padding:20px;margin:20px;border-radius:14px;font-family:Arial">
   <h2>🚀 OWAISH AI TRADER</h2>
-  <p>Live Demo Market Scanner</p>
+  <p>Live Demo Market Analysis</p>
   <p id="market-status">Connecting...</p>
-
-  <div id="market-prices">Loading market prices...</div>
+  <div id="market-prices">Loading...</div>
 </section>
 
 <script>
-const API_URL =
-  "https://owaish-ai-trading-api.onrender.com/api/scan";
+const API_URL = "https://owaish-ai-trading-api.onrender.com/api/scan";
 
 async function loadMarketPrices() {
   const status = document.getElementById("market-status");
   const output = document.getElementById("market-prices");
 
   try {
-    status.textContent = "🟢 Fetching market prices...";
-
+    status.textContent = "Fetching analysis...";
     const response = await fetch(API_URL);
     if (!response.ok) throw new Error("API error");
 
     const data = await response.json();
 
     output.innerHTML = data.markets.map(m => `
-      <div style="
-        display:flex;
-        justify-content:space-between;
-        padding:12px;
-        margin:8px 0;
-        background:#1f2937;
-        border-radius:8px;
-      ">
-        <strong>${m.symbol}</strong>
-        <span>${m.status === "success" ? m.price : "Unavailable"}</span>
+      <div style="background:#1f2937;padding:14px;margin:10px 0;border-radius:10px">
+        <h3>${m.symbol}</h3>
+        <p>Price: ${m.price ?? "Unavailable"}</p>
+        <p>RSI: ${m.rsi ?? "N/A"}</p>
+        <p>MACD: ${m.macd ?? "N/A"}</p>
+        <p>Signal: <strong style="color:${m.signal === "BUY" ? "#22c55e" : m.signal === "SELL" ? "#ef4444" : "#facc15"}">${m.signal ?? "WAIT"}</strong></p>
       </div>
     `).join("");
 
-    status.textContent = "✅ Demo scanner connected";
+    status.textContent = "✅ Demo analysis connected";
   } catch (error) {
     status.textContent = "⚠️ Connection failed. Retry shortly.";
-    output.textContent = "Market data unavailable.";
+    output.textContent = "Analysis unavailable.";
   }
 }
 
 loadMarketPrices();
-setInterval(loadMarketPrices, 30000);
+setInterval(loadMarketPrices, 300000);
 </script>
 </body>
 </html>
