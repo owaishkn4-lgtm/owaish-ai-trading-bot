@@ -3,8 +3,13 @@ import os
 import time
 import requests
 from flask import Flask, jsonify, request
+from werkzeug.security import generate_password_hash, check_password_hash
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from flask import session
+import secrets
+
+app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(32))
 app = Flask(__name__)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
