@@ -3,9 +3,17 @@ import os
 import time
 import requests
 from flask import Flask, jsonify, request
-
+import psycopg2
+from psycopg2.extras import RealDictCursor
 app = Flask(__name__)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
+def get_db_connection():
+    return psycopg2.connect(
+        DATABASE_URL,
+        cursor_factory=RealDictCursor,
+        connect_timeout=10
+    )
 @app.after_request
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
