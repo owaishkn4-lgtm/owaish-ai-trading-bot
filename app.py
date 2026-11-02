@@ -108,7 +108,12 @@ def analyse_market(symbol):
         trade_signal = "SELL"
     else:
         trade_signal = "WAIT"
-
+    if trade_signal == "BUY":
+        reason = "MACD bullish crossover with RSI in bullish range"
+    elif trade_signal == "SELL":
+        reason = "MACD bearish crossover with RSI in bearish range"
+    else:
+        reason = "No clear confirmation from RSI and MACD"
     return {
         "symbol": symbol,
         "price": prices[-1],
@@ -116,6 +121,7 @@ def analyse_market(symbol):
         "macd": round(macd, 6),
         "macd_signal": round(signal, 6),
         "signal": trade_signal,
+        "reason": reason, 
         "status": "success"
     }
 
