@@ -101,7 +101,7 @@ def analyse_market(symbol):
 
     macd = macd_line[-1]
     signal = signal_line[-1]
-    macd_direction = 1 if macd > signal else -1 if mac < signal else 0
+    macd_direction = 1 if macd > signal else -1 if macd < signal else 0
     rsi_direction = 1 if rsi > 50 else -1 if rsi < 50 else 0
 
     if macd_direction == 0 or rsi_direction == 0:
