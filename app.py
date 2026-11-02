@@ -9,8 +9,9 @@ from psycopg2.extras import RealDictCursor
 from flask import session
 import secrets
 
-app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(32))
 app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(32))
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 def get_db_connection():
