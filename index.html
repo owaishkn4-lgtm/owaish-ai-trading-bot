@@ -139,6 +139,7 @@ $('signal').className='signal '+(
    $('signal').textContent='DAILY LIMIT — PAUSED';
   }else if(running && signal!=='WAIT' && signal!==lastTradeSignal && positions.length<Number($('limit').value)){
    openPosition(signal);
+   render(); 
    lastTradeSignal=signal;
   }else if(signal==='WAIT'){
    lastTradeSignal='WAIT';
