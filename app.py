@@ -211,12 +211,12 @@ def scan():
     for symbol in MARKETS:
         try:
             results.append(analyse_market(symbol))
-        except Exception:
+               except Exception as e:
             results.append({
                 "symbol": symbol,
                 "status": "error",
-                "message": "Analysis unavailable. Try again later."
-            })
+                "message": str(e)
+            }) 
 
     cache["time"] = time.time()
     cache["results"] = results
