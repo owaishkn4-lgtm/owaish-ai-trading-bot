@@ -11,7 +11,11 @@ import secrets
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(32))
-
+app.config.update(
+    SESSION_COOKIE_SAMESITE="None",
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True
+)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 def get_db_connection():
@@ -60,8 +64,9 @@ init_db()
 
 @app.after_request
 def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    response.headers["Access-Control-Allow-Origin"] = "https://owaish-ai-trading-bot.onrender.com"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     return response
 
@@ -186,7 +191,95 @@ def analyse_market(symbol):
         "status": "success"
     }
 
+@app.route("/api/register", methods=["POST"])
+def register():
+    data = request.get_json(silent=True) or {}
 
+    email = data.get("email", "").strip().lower()
+    password = data.get("password", "")
+
+    if not email or not password:
+        return jsonify({"error": "Email and password required"}), 400
+
+    if len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        password_hash = generate_password_hash(password)
+
+        cur.execute(
+            """
+            INSERT INTO users (email, password_hash)
+            VALUES (%s, %s)
+            RETURNING id, email
+            """,
+            (email, password_hash)
+        )
+
+        user = cur.fetchone()
+        conn.commit()
+
+        return jsonify({
+            "message": "Registration successful",
+            "user": dict(user)
+        }), 201
+
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return jsonify({"error": "Email already registered"}), 409
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    data = request.get_json(silent=True) or {}
+
+    email = data.get("email", "").strip().lower()
+    password = data.get("password", "")
+
+    if not email or not password:
+        return jsonify({"error": "Email and password required"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id, email, password_hash FROM users WHERE email = %s",
+            (email,)
+        )
+        user = cur.fetchone()
+
+        if not user or not check_password_hash(
+            user["password_hash"], password
+        ):
+            return jsonify({"error": "Invalid email or password"}), 401
+
+        session.clear()
+        session["user_id"] = user["id"]
+
+        return jsonify({
+            "message": "Login successful",
+            "user": {
+                "id": user["id"],
+                "email": user["email"]
+            }
+        })
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify({"message": "Logout successful"})
 @app.route("/")
 def home():
     return "OWAISH AI TRADER API is running!"
