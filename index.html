@@ -118,9 +118,23 @@ ticks++;
   $('rsi').textContent=rsi.toFixed(1);
   $('macd').textContent=macd.toFixed(priceDigits());
 
-  let signal=(rsi<35&&macd>0)?'BUY':(rsi>65&&macd<0)?'SELL':'WAIT';
-  $('signal').textContent=signal;
-  $('signal').className='signal '+(signal==='BUY'?'green':signal==='SELL'?'red':'');
+ const scanResponse = await fetch(API_BASE+'/api/scan');
+if(!scanResponse.ok) throw new Error('Signal API failed');
+
+const scanData = await scanResponse.json();
+
+const marketSignal = scanData.markets.find(
+ m => m.symbol === marketSymbol
+);
+
+let signal = (
+ marketSignal && marketSignal.status === 'success'
+) ? marketSignal.signal : 'WAIT';
+
+$('signal').textContent=signal;
+$('signal').className='signal '+(
+ signal==='BUY'?'green':signal==='SELL'?'red':''
+); 
 
   managePositions();
 
