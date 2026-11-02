@@ -29,6 +29,14 @@ canvas{width:100%;height:190px;display:block}.foot{font-size:12px;color:var(--mu
  <div class="card"><div class="label">Closed P/L</div><div class="metric" id="pnl">₹0.00</div></div>
  <div class="card"><div class="label">Open positions</div><div class="metric" id="open">0</div></div>
 </div>
+ 
+<section class="card" style="margin-bottom:15px">
+  <h3>📊 Open Trades</h3>
+  <div id="open-trades">
+    <p class="muted">No open trades yet.</p>
+  </div>
+</section>
+
 <div class="grid" style="grid-template-columns:1fr">
  <section class="card">
   <div class="top"><div><div class="label">Simulated market</div> <div>
@@ -154,38 +162,76 @@ $('signal').className='signal '+(
  }
 }
 
+
 function openPosition(side){
  const risk=Number($('capital').value)*Number($('risk').value);
  const distance=price*0.001;
- positions.push({
-  side,entry:price,
+
+ const trade={
+  id:Date.now(),
+  side,
+  entry:price,
+  currentPrice:price,
   stop:side==='BUY'?price-distance:price+distance,
   target:side==='BUY'?price+distance*1.5:price-distance*1.5,
-  risk,at:new Date().toLocaleTimeString()
+  risk,
+  at:new Date().toLocaleString('en-IN'),
+  status:'OPEN'
+ };
+
+ positions.push(trade);
+ render();
+}
+
+
+
+function closeTrade(id, reason='MANUAL'){
+ const index=positions.findIndex(p=>p.id===id);
+ if(index===-1)return;
+
+ const p=positions[index];
+ const exitPrice=price;
+ const move=p.side==='BUY'
+  ? exitPrice-p.entry
+  : p.entry-exitPrice;
+
+ const pl=(move/(p.entry*0.001))*p.risk;
+
+ balance+=pl;
+ closedPnl+=pl;
+ if(pl<0)dayLoss+=Math.abs(pl);
+
+ history.unshift({
+  time:new Date().toLocaleString('en-IN'),
+  entryTime:p.at,
+  side:p.side,
+  entry:p.entry,
+  exit:exitPrice,
+  pl,
+  reason
  });
+
+ history=history.slice(0,100);
+ positions.splice(index,1);
+ render();
 }
 
 function managePositions(){
- positions=positions.filter(p=>{
-  let hit=p.side==='BUY'?(price<=p.stop||price>=p.target):(price>=p.stop||price<=p.target);
-  if(!hit)return true;
-  let win=p.side==='BUY'?price>p.entry:price<p.entry;
-  let pl=win?p.risk*1.5:-p.risk;
-  balance+=pl;
-  closedPnl+=pl;
-  if(pl<0)dayLoss+=-pl;
-  history.unshift({
-   time:new Date().toLocaleTimeString(),
-   side:p.side,entry:p.entry,exit:price,pl
-  });
-  history=history.slice(0,12);
-  return false;
+ positions.slice().forEach(p=>{
+  let hit=p.side==='BUY'
+   ?(price<=p.stop||price>=p.target)
+   :(price>=p.stop||price<=p.target);
+
+  if(hit){
+   closeTrade(p.id,'STOP LOSS / TARGET');
+  }
  });
 }
 
-function render(){
+
+ function render(){
  let floating=positions.reduce((s,p)=>{
-  let move=p.side==='BUY'?price-p.entry: p.entry-price;
+  let move=p.side==='BUY'?price-p.entry:p.entry-price;
   return s+(move/(p.entry*0.001))*p.risk;
  },0);
 
@@ -196,6 +242,24 @@ function render(){
  $('pnl').textContent=fmtINR(totalPnl);
  $('open').textContent=positions.length;
  $('pnl').className='metric '+(totalPnl>=0?'green':'red');
+
+ $('open-trades').innerHTML=positions.length?positions.map(p=>{
+  let move=p.side==='BUY'?price-p.entry:p.entry-price;
+  let pl=(move/(p.entry*0.001))*p.risk;
+
+  return `
+   <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0">
+    <b class="${p.side==='BUY'?'green':'red'}">${p.side}</b>
+    <p>Entry Time: ${p.at}</p>
+    <p>Entry Price: ${p.entry.toFixed(priceDigits())}</p>
+    <p>Current Price: ${price.toFixed(priceDigits())}</p>
+    <p>Stop Loss: ${p.stop.toFixed(priceDigits())}</p>
+    <p>Target: ${p.target.toFixed(priceDigits())}</p>
+    <p class="${pl>=0?'green':'red'}">Floating P/L: ${fmtINR(pl)}</p>
+    <button class="stop" onclick="closeTrade(${p.id})">EXIT TRADE</button>
+   </div>
+  `;
+ }).join(''):'<p class="muted">No open trades yet.</p>';
 
  $('history').innerHTML=history.length?history.map(h=>
   `<tr><td>${h.time}</td><td class="${h.side==='BUY'?'green':'red'}">${h.side}</td><td>${h.entry.toFixed(priceDigits())}</td><td>${h.exit.toFixed(priceDigits())}</td><td class="${h.pl>=0?'green':'red'}">${fmtINR(h.pl)}</td></tr>`
