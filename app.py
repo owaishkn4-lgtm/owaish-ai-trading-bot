@@ -49,6 +49,7 @@ def init_db():
     cur.close()
     conn.close()
     print("Database tables ready!")
+init_db()
 @app.after_request
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
