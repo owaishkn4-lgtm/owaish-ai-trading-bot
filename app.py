@@ -2,7 +2,7 @@
 import os
 import time
 import requests
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
@@ -144,6 +144,54 @@ def home():
 def health():
     return jsonify({"status": "ok"})
 
+
+@app.route("/api/candles")
+def candles():
+    if not API_KEY:
+        return jsonify({"error": "API key not configured"}), 500
+
+    symbol = request.args.get("symbol", "EUR/USD")
+
+    if symbol not in MARKETS:
+        return jsonify({"error": "Unsupported market"}), 400
+
+    try:
+        response = requests.get(
+            BASE_URL,
+            params={
+                "symbol": symbol,
+                "interval": "5min",
+                "outputsize": 60,
+                "apikey": API_KEY
+            },
+            timeout=20
+        )
+        data = response.json()
+
+        if not response.ok or "values" not in data:
+            return jsonify({
+                "error": data.get("message", "Market data unavailable")
+            }), 502
+
+        candles_data = [
+            {
+                "time": item["datetime"],
+                "open": float(item["open"]),
+                "high": float(item["high"]),
+                "low": float(item["low"]),
+                "close": float(item["close"])
+            }
+            for item in reversed(data["values"])
+        ]
+
+        return jsonify({
+            "symbol": symbol,
+            "interval": "5min",
+            "candles": candles_data
+        })
+
+    except Exception:
+        return jsonify({"error": "Unable to fetch candles"}), 500
 
 @app.route("/api/scan")
 def scan():
