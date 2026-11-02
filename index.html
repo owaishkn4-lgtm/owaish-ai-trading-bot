@@ -68,7 +68,7 @@ const API_BASE = 'https://owaish-ai-trading-api.onrender.com';
 let balance=5000, price=1.085, prices=[], running=false, timer=null;
 let positions=[], history=[], closedPnl=0, dayLoss=0, ticks=0;
 let marketSymbol='EUR/USD', lastCandleTime=null, fetching=false;
-
+let lastTradeSignal='WAIT';
 function fmtINR(n){return '₹'+n.toFixed(2)}
 function priceDigits(){return price < 10 ? 5 : 2}
 
@@ -136,16 +136,18 @@ $('signal').className='signal '+(
  signal==='BUY'?'green':signal==='SELL'?'red':''
 ); 
 
-  managePositions();
+    managePositions();
 
   let dailyLimit=Number($('daily').value)*Number($('capital').value);
   if(dayLoss>=dailyLimit){
    stop();
    $('signal').textContent='DAILY LIMIT — PAUSED';
-  }else if(signal!=='WAIT'&&positions.length<Number($('limit').value)&&ticks%5===0){
+  }else if(signal!=='WAIT' && signal!==lastTradeSignal && positions.length<Number($('limit').value)){
    openPosition(signal);
+   lastTradeSignal=signal;
+  }else if(signal==='WAIT'){
+   lastTradeSignal='WAIT';
   }
-
   render();
   draw();
  }catch(error){
@@ -240,7 +242,7 @@ function reset(){
  stop();
  balance=Number($('capital').value);
  prices=[];positions=[];history=[];
- closedPnl=0;dayLoss=0;ticks=0;lastCandleTime=null;
+ closedPnl=0;dayLoss=0;ticks=0;lastCandleTime=null;lastTradeSignal='WAIT';
  render();
  $('price').textContent='Loading...';
  $('signal').textContent='WAIT';
