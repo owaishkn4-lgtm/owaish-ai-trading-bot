@@ -28,6 +28,7 @@ FRONTEND_ORIGIN = "https://owaish-ai-trading-bot.onrender.com"
 DATABASE_URL = os.getenv("DATABASE_URL")
 API_KEY = os.getenv("TWELVE_DATA_API_KEY")
 BASE_URL = "https://api.twelvedata.com/time_series"
+PRICE_URL = "https://api.twelvedata.com/price"
 MARKETS = ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "BTC/USD", "ETH/USD"]
 
 candle_cache = {}
