@@ -16,7 +16,9 @@ button,select,input{border:1px solid var(--line);background:#1a2a43;color:var(--
 input{width:100%;margin:6px 0 12px}button{cursor:pointer}button.primary{background:#245bba;border-color:#3979df}button.stop{background:#522431;border-color:#88404e}button:disabled{opacity:.45}
 .controls{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}.green{color:var(--green)}.red{color:var(--red)}
 .notice{border:1px solid #775f2b;background:#2c2618;color:#f5d995;padding:12px;border-radius:12px;font-size:13px;line-height:1.5;margin:13px 0}
-#auth-screen{max-width:430px;margin:8vh auto;padding:22px;background:var(--panel);border:1px solid var(--line);border-radius:16px}
+#loading-screen{max-width:430px;margin:18vh auto;padding:28px 22px;text-align:center;background:var(--panel);border:1px solid var(--line);border-radius:16px}
+#loading-screen h1{margin-bottom:8px}
+#auth-screen{display:none;max-width:430px;margin:8vh auto;padding:22px;background:var(--panel);border:1px solid var(--line);border-radius:16px}
 #auth-screen h1{margin-bottom:6px}#auth-message{min-height:20px;color:#ffb7bd;font-size:13px}#dashboard{display:none}
 #live-candles{height:330px;width:100%;margin-top:10px}
 .signal{font-size:21px;font-weight:700;margin:7px 0}
@@ -27,6 +29,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;p
 </style>
 </head>
 <body>
+<section id="loading-screen"><h1>OWAISH AI TRADER</h1><p class="muted">Checking your demo session...</p></section>
 <section id="auth-screen">
 <h1>OWAISH AI TRADER</h1><p class="muted">Demo account sign in / registration</p>
 <label class="label" for="auth-email">Email</label><input id="auth-email" type="email" autocomplete="email" placeholder="you@example.com">
@@ -88,9 +91,9 @@ async function api(path,options={}){
   if(!r.ok){const err=new Error(d.error||'Request failed ('+r.status+')');err.status=r.status;throw err;}
   return d;
 }
-function showAuth(msg=''){$('auth-screen').style.display='block';$('dashboard').style.display='none';$('auth-message').textContent=msg;stop();if(chartTimer)clearInterval(chartTimer);}
+function showAuth(msg=''){$('loading-screen').style.display='none';$('auth-screen').style.display='block';$('dashboard').style.display='none';$('auth-message').textContent=msg;stop();if(chartTimer)clearInterval(chartTimer);}
 function initChart(){if(liveChart||!window.LightweightCharts)return;const el=$('live-candles');liveChart=LightweightCharts.createChart(el,{width:el.clientWidth,height:el.clientHeight,layout:{background:{color:'#121d30'},textColor:'#edf4ff'},grid:{vertLines:{color:'#26364f'},horzLines:{color:'#26364f'}},timeScale:{timeVisible:true}});candleSeries=liveChart.addSeries(LightweightCharts.CandlestickSeries,{upColor:'#2bd39b',downColor:'#ff6878',borderVisible:false,wickUpColor:'#2bd39b',wickDownColor:'#ff6878'});window.addEventListener('resize',()=>{if(liveChart)liveChart.applyOptions({width:el.clientWidth});});}
-function showDashboard(user){currentUser=user;$('auth-screen').style.display='none';$('dashboard').style.display='block';$('signed-in-as').textContent='Signed in: '+(user.email||'Demo user');initChart();loadLiveCandles();loadMarketPrices();if(chartTimer)clearInterval(chartTimer);chartTimer=setInterval(loadLiveCandles,15000);}
+function showDashboard(user){currentUser=user;$('loading-screen').style.display='none';$('auth-screen').style.display='none';$('dashboard').style.display='block';$('signed-in-as').textContent='Signed in: '+(user.email||'Demo user');initChart();loadLiveCandles();loadMarketPrices();if(chartTimer)clearInterval(chartTimer);chartTimer=setInterval(loadLiveCandles,15000);}
 async function authenticate(mode){const email=$('auth-email').value.trim(),password=$('auth-password').value;if(!email||!password){$('auth-message').textContent='Email aur password enter karo.';return;}if(mode==='register'&&password.length<8){$('auth-message').textContent='Password kam se kam 8 characters ka hona chahiye.';return;}$('auth-login').disabled=$('auth-register').disabled=true;try{const d=await api(mode==='register'?'/api/register':'/api/login',{method:'POST',body:JSON.stringify({email,password})});showDashboard(d.user);await loadCloudState();}catch(e){$('auth-message').textContent=e.message;}finally{$('auth-login').disabled=$('auth-register').disabled=false;}}
 $('auth-login').onclick=()=>authenticate('login');$('auth-register').onclick=()=>authenticate('register');
 $('auth-logout').onclick=async()=>{try{await api('/api/logout',{method:'POST',body:'{}'});}catch(e){}currentUser=null;showAuth('You have been logged out.');};
@@ -172,8 +175,6 @@ async function reset(){
 $('start').onclick=start;$('pause').onclick=stop;$('reset').onclick=reset;
 ['capital','risk','daily','limit'].forEach(id=>$(id).onchange=saveState);
 
-// Restore preferences and verify the server session. Only a confirmed 401 means
-// the session is absent; network/server errors are reported without claiming logout.
 try{const saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');if(saved.capital)$('capital').value=saved.capital;if(saved.risk)$('risk').value=saved.risk;if(saved.daily)$('daily').value=saved.daily;if(saved.limit)$('limit').value=saved.limit;}catch(e){}
 (async()=>{
   try{
