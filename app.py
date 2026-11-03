@@ -33,7 +33,7 @@ MARKETS = ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "BTC/USD", "ETH/USD"]
 candle_cache = {}
 scan_cache = {"time": 0, "results": []}
 CANDLE_CACHE_SECONDS = 10
-SCAN_CACHE_SECONDS = 60
+SCAN_CACHE_SECONDS = 10
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not configured in Render.")
