@@ -32,8 +32,10 @@ PRICE_URL = "https://api.twelvedata.com/price"
 MARKETS = ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "BTC/USD", "ETH/USD"]
 
 candle_cache = {}
+live_price_cache = {}
 scan_cache = {"time": 0, "results": []}
 CANDLE_CACHE_SECONDS = 10
+LIVE_PRICE_CACHE_SECONDS = 5
 SCAN_CACHE_SECONDS = 10
 
 if not DATABASE_URL:
@@ -491,6 +493,39 @@ def fetch_one_minute_candles(symbol, outputsize=500):
     return rows
 
 
+def fetch_live_price(symbol):
+    """Fetch a current quote, caching it briefly to limit provider API usage."""
+    if not API_KEY:
+        raise RuntimeError("TWELVE_DATA_API_KEY is not configured in Render.")
+
+    now = time.time()
+    cached = live_price_cache.get(symbol)
+    if cached and now - cached["time"] < LIVE_PRICE_CACHE_SECONDS:
+        return cached["price"]
+
+    response = requests.get(
+        PRICE_URL,
+        params={"symbol": symbol, "apikey": API_KEY},
+        timeout=10,
+    )
+
+    try:
+        data = response.json()
+    except ValueError:
+        raise RuntimeError("Live-price provider returned an unreadable response.")
+
+    if not response.ok or "price" not in data:
+        message = data.get("message") or data.get("code") or "Live price unavailable"
+        raise RuntimeError(str(message))
+
+    live_price = float(data["price"])
+    if not (live_price > 0 and live_price < float("inf")):
+        raise RuntimeError("Provider returned an invalid live price.")
+
+    live_price_cache[symbol] = {"time": now, "price": live_price}
+    return live_price
+
+
 def aggregate_candles(source_rows, minutes):
     grouped = {}
 
@@ -558,9 +593,13 @@ def analyse_market(symbol):
         else "No clear indicator alignment"
     )
 
+    # Use a live quote for EUR/USD; indicators still use historical 1-minute candles.
+    current_price = fetch_live_price(symbol) if symbol == "EUR/USD" else prices[-1]
+
     return {
         "symbol": symbol,
-        "price": prices[-1],
+        "price": current_price,
+        "price_source": "live_quote" if symbol == "EUR/USD" else "1min_candle",
         "rsi": rsi,
         "macd": round(macd, 8),
         "macd_signal": round(signal, 8),
