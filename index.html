@@ -39,14 +39,12 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;p
 <header class="top"><div><h1>OWAISH AI TRADER</h1><div class="sub">Demo dashboard · simulated account</div></div><div><span class="pill">● DEMO ONLY</span> <button id="auth-logout">Logout</button></div></header>
 <div class="muted" id="signed-in-as" style="margin-top:8px"></div>
 <div class="notice"><b>Simulation only:</b> No broker connection and no real orders. BUY / SELL / WAIT are illustrative signals, not guaranteed predictions or financial advice.</div>
-
 <section class="grid metrics">
 <div class="card"><div class="label">Virtual balance</div><div class="metric" id="balance">₹5,000.00</div></div>
 <div class="card"><div class="label">Simulated equity</div><div class="metric" id="equity">₹5,000.00</div></div>
 <div class="card"><div class="label">Closed P/L</div><div class="metric" id="pnl">₹0.00</div></div>
 <div class="card"><div class="label">Open positions</div><div class="metric" id="open">0</div></div>
 </section>
-
 <section class="card">
 <div class="top"><div><h2>📈 Live Market Chart</h2><div class="muted">Market candles · demo display</div></div>
 <div class="controls" style="margin-top:0">
@@ -55,10 +53,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;p
 </div></div>
 <p id="chart-status" class="muted">Loading chart...</p><div id="live-candles"></div>
 </section>
-
 <section class="card"><div class="top"><div><h2>🤖 Market Analysis</h2><div class="muted">Backend indicator output · illustrative</div></div><span class="pill">DEMO SIGNALS</span></div>
 <p id="market-status" class="muted">Connecting...</p><div id="market-prices" class="muted">Loading analysis...</div></section>
-
 <section class="card"><div class="top"><div><h2>Simulation Controls</h2><div class="muted">Virtual portfolio only</div></div>
 <select id="sim-symbol"><option value="EUR/USD">EUR/USD</option><option value="GBP/USD">GBP/USD</option><option value="USD/JPY">USD/JPY</option><option value="XAU/USD">Gold (XAU/USD)</option><option value="BTC/USD">Bitcoin (BTC/USD)</option><option value="ETH/USD">Ethereum (ETH/USD)</option></select></div>
 <div class="grid" style="margin-top:12px">
@@ -69,34 +65,55 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;p
 </div>
 <div class="controls"><button class="primary" id="start">Start simulation</button><button id="pause" disabled>Pause</button><button class="stop" id="reset">Reset demo</button></div>
 </section>
-
 <section class="card"><h2>Risk Controls — Demo</h2><div class="grid">
 <div><div class="label">Virtual starting balance</div><select id="capital"><option value="1000">₹1,000</option><option value="2500">₹2,500</option><option value="5000" selected>₹5,000</option></select></div>
 <div><div class="label">Simulated risk per position</div><select id="risk"><option value="0.005">0.5%</option><option value="0.01" selected>1%</option></select></div>
 <div><div class="label">Daily demo loss limit</div><select id="daily"><option value="0.02">2%</option><option value="0.03" selected>3%</option></select></div>
 <div><div class="label">Maximum demo positions</div><select id="limit"><option>1</option><option selected>2</option></select></div>
 </div><p class="muted">Simplified calculations for practice only. Not validated signals or return predictions.</p></section>
-
 <section class="card"><h2>Open Demo Positions</h2><div id="open-trades"><p class="muted">No open positions yet.</p></div></section>
 <section class="card"><h2>Demo Trade History</h2><div style="overflow-x:auto"><table><thead><tr><th>Time</th><th>Side</th><th>Entry</th><th>Exit</th><th>P/L</th></tr></thead><tbody id="history"><tr><td colspan="5" class="muted">No simulated trades yet.</td></tr></tbody></table></div></section>
 <div class="foot">Demo simulation only. No broker execution. Never enter broker passwords, OTPs, payment details, or API secrets here.</div>
 </main></div>
-
 <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 <script>
 const $=id=>document.getElementById(id),API_BASE='https://owaish-ai-trading-api.onrender.com';
-let balance=5000,price=1.085,prices=[],running=false,timer=null,positions=[],history=[],closedPnl=0,dayLoss=0,lastCandleTime=null,fetching=false,lastTradeSignal='WAIT',marketSymbol='EUR/USD',currentUser=null,cloudBusy=false,liveChart=null,candleSeries=null,chartTimer=null,chartHasInitialFit=false;
+let balance=5000,price=1.085,prices=[],running=false,timer=null,positions=[],history=[],closedPnl=0,dayLoss=0,lastTradeSignal='WAIT',marketSymbol='EUR/USD',currentUser=null,cloudBusy=false,liveChart=null,candleSeries=null,chartTimer=null,chartHasInitialFit=false;
 const STORAGE_KEY='owaish_ai_trader_demo_v2';
 function selectedTimeframe(){return Number($('chart-timeframe')?.value||1);}
 async function api(path,options={}){const r=await fetch(API_BASE+path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Request failed ('+r.status+')');return d;}
 function showAuth(msg=''){$('auth-screen').style.display='block';$('dashboard').style.display='none';$('auth-message').textContent=msg;stop();if(chartTimer)clearInterval(chartTimer);}
 function initChart(){if(liveChart||!window.LightweightCharts)return;const el=$('live-candles');liveChart=LightweightCharts.createChart(el,{width:el.clientWidth,height:el.clientHeight,layout:{background:{color:'#121d30'},textColor:'#edf4ff'},grid:{vertLines:{color:'#26364f'},horzLines:{color:'#26364f'}},timeScale:{timeVisible:true}});candleSeries=liveChart.addSeries(LightweightCharts.CandlestickSeries,{upColor:'#2bd39b',downColor:'#ff6878',borderVisible:false,wickUpColor:'#2bd39b',wickDownColor:'#ff6878'});window.addEventListener('resize',()=>{if(liveChart)liveChart.applyOptions({width:el.clientWidth});});}
-function showDashboard(user){currentUser=user;$('auth-screen').style.display='none';$('dashboard').style.display='block';$('signed-in-as').textContent='Signed in: '+user.email;initChart();loadLiveCandles();loadMarketPrices();if(chartTimer)clearInterval(chartTimer);chartTimer=setInterval(loadLiveCandles,15000);}
+function showDashboard(user){currentUser=user;$('auth-screen').style.display='none';$('dashboard').style.display='block';$('signed-in-as').textContent='Signed in: '+(user.email||'Demo user');initChart();loadLiveCandles();loadMarketPrices();if(chartTimer)clearInterval(chartTimer);chartTimer=setInterval(loadLiveCandles,15000);}
 async function authenticate(mode){const email=$('auth-email').value.trim(),password=$('auth-password').value;if(!email||!password){$('auth-message').textContent='Email aur password enter karo.';return;}if(mode==='register'&&password.length<8){$('auth-message').textContent='Password kam se kam 8 characters ka hona chahiye.';return;}$('auth-login').disabled=$('auth-register').disabled=true;try{const d=await api(mode==='register'?'/api/register':'/api/login',{method:'POST',body:JSON.stringify({email,password})});showDashboard(d.user);await loadCloudState();}catch(e){$('auth-message').textContent=e.message;}finally{$('auth-login').disabled=$('auth-register').disabled=false;}}
 $('auth-login').onclick=()=>authenticate('login');$('auth-register').onclick=()=>authenticate('register');
 $('auth-logout').onclick=async()=>{try{await api('/api/logout',{method:'POST',body:'{}'});}catch(e){}currentUser=null;showAuth('You have been logged out.');};
-async function loadCloudState(){try{const [a,t]=await Promise.all([api('/api/account'),api('/api/trades')]);balance=Number(a.balance)||5000;closedPnl=Number(a.closed_pnl)||0;dayLoss=Number(a.day_loss)||0;marketSymbol=a.market_symbol||'EUR/USD';$('sim-symbol').value=marketSymbol;$('chart-symbol').value=marketSymbol;positions=[];history=[];(t.trades||[]).forEach(x=>{const at=x.entry_time?new Date(x.entry_time).toLocaleString('en-IN'):'';if(x.status==='OPEN')positions.push({id:Number(x.id),cloudId:Number(x.id),side:x.side,entry:Number(x.entry_price),stop:Number(x.stop_loss),target:Number(x.target),risk:Number(x.quantity)||0,at});else history.push({time:x.exit_time?new Date(x.exit_time).toLocaleString('en-IN'):at,side:x.side,entry:Number(x.entry_price),exit:Number(x.exit_price)||0,pl:Number(x.pnl)||0});});render();await update();}catch(e){showAuth('Cloud data load failed: '+e.message);}}
-async function saveCloudAccount(){if(!currentUser||cloudBusy)return;cloudBusy=true;try{await api('/api/account',{method:'PUT',body:JSON.stringify({balance,closed_pnl:closedPnl,day_loss:dayLoss,market_symbol:marketSymbol})});}catch(e){console.error(e);}finally{cloudBusy=false;}}
+
+async function loadCloudState(){
+  if(!currentUser)return;
+  let accountLoaded=false,tradesLoaded=false;
+  try{
+    const a=await api('/api/account');
+    balance=Number(a.balance)||5000;closedPnl=Number(a.closed_pnl)||0;dayLoss=Number(a.day_loss)||0;
+    marketSymbol=a.market_symbol||'EUR/USD';
+    $('sim-symbol').value=marketSymbol;$('chart-symbol').value=marketSymbol;
+    accountLoaded=true;
+  }catch(e){console.error('Account load failed:',e);$('market-status').textContent='Account data temporarily unavailable; dashboard remains open.';}
+  try{
+    const t=await api('/api/trades');
+    positions=[];history=[];
+    (t.trades||[]).forEach(x=>{
+      const at=x.entry_time?new Date(x.entry_time).toLocaleString('en-IN'):'';
+      if(x.status==='OPEN')positions.push({id:Number(x.id),cloudId:Number(x.id),side:x.side,entry:Number(x.entry_price),stop:Number(x.stop_loss),target:Number(x.target),risk:Number(x.quantity)||0,at});
+      else history.push({time:x.exit_time?new Date(x.exit_time).toLocaleString('en-IN'):at,side:x.side,entry:Number(x.entry_price),exit:Number(x.exit_price)||0,pl:Number(x.pnl)||0});
+    });
+    tradesLoaded=true;
+  }catch(e){console.error('Trade history load failed:',e);$('market-status').textContent='Trade history temporarily unavailable; dashboard remains open.';}
+  render();
+  if(accountLoaded||tradesLoaded)await update();
+  if(!accountLoaded&&!tradesLoaded)$('market-status').textContent='Cloud data unavailable. Your login is still active; retry by refreshing later.';
+}
+async function saveCloudAccount(){if(!currentUser||cloudBusy)return;cloudBusy=true;try{await api('/api/account',{method:'PUT',body:JSON.stringify({balance,closed_pnl:closedPnl,day_loss:dayLoss,market_symbol:marketSymbol})});}catch(e){console.error('Account save failed:',e);}finally{cloudBusy=false;}}
 function saveState(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify({capital:$('capital').value,risk:$('risk').value,daily:$('daily').value,limit:$('limit').value}));}catch(e){}if(currentUser)saveCloudAccount();}
 function fmt(n){return '₹'+Number(n||0).toFixed(2)}function digits(){return price<10?5:2;}
 function indicatorValues(){const d=prices.slice(1).map((v,i)=>v-prices[i]),up=d.filter(x=>x>0).reduce((a,b)=>a+b,0),dn=-d.filter(x=>x<0).reduce((a,b)=>a+b,0),rsi=d.length?(dn===0?70:100-100/(1+up/(dn||1e-9))):50,fast=prices.slice(-5).reduce((a,b)=>a+b,0)/Math.max(1,Math.min(5,prices.length)),slow=prices.slice(-12).reduce((a,b)=>a+b,0)/Math.max(1,Math.min(12,prices.length));return{rsi,macd:fast-slow};}
@@ -112,8 +129,21 @@ function start(){if(running)return;running=true;$('start').disabled=true;$('paus
 function stop(){running=false;clearInterval(timer);timer=null;if($('start')){$('start').disabled=false;$('pause').disabled=true;}}
 function reset(){stop();balance=Number($('capital').value);positions=[];history=[];closedPnl=0;dayLoss=0;lastTradeSignal='WAIT';render();update();}
 $('start').onclick=start;$('pause').onclick=stop;$('reset').onclick=reset;
-$('sim-symbol').onchange=()=>{marketSymbol=$('sim-symbol').value;$('chart-symbol').value=marketSymbol;chartHasInitialFit=false;saveState();loadLiveCandles();update();};
 ['capital','risk','daily','limit'].forEach(id=>$(id).onchange=saveState);
-(async()=>{try{const d=await api('/api/me');showDashboard(d.user);await loadCloudState();}catch(e){showAuth('Please login or create a demo account.');}})();
+
+// Restore UI preferences, then verify the server session. A cloud-data failure
+// must NOT sign the user out; only a failed /api/me check shows the login screen.
+try{const saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');if(saved.capital)$('capital').value=saved.capital;if(saved.risk)$('risk').value=saved.risk;if(saved.daily)$('daily').value=saved.daily;if(saved.limit)$('limit').value=saved.limit;}catch(e){}
+(async()=>{
+  try{
+    const d=await api('/api/me');
+    if(!d.user)throw Error('No active session');
+    showDashboard(d.user);
+    await loadCloudState();
+  }catch(e){
+    console.warn('Session check:',e);
+    showAuth('Please login or create a demo account.');
+  }
+})();
 </script>
 </body></html>
