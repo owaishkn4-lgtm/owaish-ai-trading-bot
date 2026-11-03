@@ -1,6 +1,8 @@
 import os
 import time
 import calendar
+from datetime import timedelta
+
 import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -8,15 +10,18 @@ from flask import Flask, jsonify, request, session
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY")
-if not app.secret_key:
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
     raise RuntimeError("Set a fresh, strong SECRET_KEY environment variable in Render.")
 
 app.config.update(
+    SECRET_KEY=SECRET_KEY,
+    SESSION_COOKIE_NAME="owaish_session",
     SESSION_COOKIE_SAMESITE="None",
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
-    PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 7,
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
 )
 
 FRONTEND_ORIGIN = "https://owaish-ai-trading-bot.onrender.com"
@@ -123,6 +128,7 @@ def add_security_headers(response):
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type"
         response.headers["Vary"] = "Origin"
+
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
@@ -149,6 +155,7 @@ def register():
     data = request.get_json(silent=True) or {}
     email = str(data.get("email", "")).strip().lower()
     password = data.get("password", "")
+
     if not email or "@" not in email or len(email) > 255:
         return jsonify({"error": "Enter a valid email"}), 400
     if not isinstance(password, str) or len(password) < 8:
@@ -158,7 +165,11 @@ def register():
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO users (email, password_hash) VALUES (%s, %s) RETURNING id, email",
+                """
+                INSERT INTO users (email, password_hash)
+                VALUES (%s, %s)
+                RETURNING id, email
+                """,
                 (email, generate_password_hash(password)),
             )
             user = cur.fetchone()
@@ -166,11 +177,17 @@ def register():
                 "INSERT INTO demo_accounts (user_id, balance) VALUES (%s, 5000)",
                 (user["id"],),
             )
+
         conn.commit()
         session.clear()
         session.permanent = True
         session["user_id"] = user["id"]
-        return jsonify({"message": "Registration successful", "user": dict(user)}), 201
+
+        return jsonify({
+            "message": "Registration successful",
+            "user": dict(user),
+        }), 201
+
     except psycopg2.errors.UniqueViolation:
         conn.rollback()
         return jsonify({"error": "Email already registered"}), 409
@@ -183,6 +200,7 @@ def login():
     data = request.get_json(silent=True) or {}
     email = str(data.get("email", "")).strip().lower()
     password = data.get("password", "")
+
     if not email or not isinstance(password, str):
         return jsonify({"error": "Email and password required"}), 400
 
@@ -194,20 +212,29 @@ def login():
                 (email,),
             )
             user = cur.fetchone()
+
             if not user or not check_password_hash(user["password_hash"], password):
                 return jsonify({"error": "Invalid email or password"}), 401
+
             cur.execute(
-                "INSERT INTO demo_accounts (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING",
+                """
+                INSERT INTO demo_accounts (user_id)
+                VALUES (%s)
+                ON CONFLICT (user_id) DO NOTHING
+                """,
                 (user["id"],),
             )
+
         conn.commit()
         session.clear()
         session.permanent = True
         session["user_id"] = user["id"]
+
         return jsonify({
             "message": "Login successful",
             "user": {"id": user["id"], "email": user["email"]},
         })
+
     finally:
         conn.close()
 
@@ -223,14 +250,17 @@ def me():
     uid, error = require_login()
     if error:
         return error
+
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT id, email FROM users WHERE id = %s", (uid,))
             user = cur.fetchone()
+
         if not user:
             session.clear()
             return jsonify({"error": "User not found"}), 401
+
         return jsonify({"user": dict(user)})
     finally:
         conn.close()
@@ -241,22 +271,32 @@ def account():
     uid, error = require_login()
     if error:
         return error
+
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             if request.method == "GET":
                 cur.execute(
-                    "SELECT balance, closed_pnl, day_loss, market_symbol FROM demo_accounts WHERE user_id = %s",
+                    """
+                    SELECT balance, closed_pnl, day_loss, market_symbol
+                    FROM demo_accounts WHERE user_id = %s
+                    """,
                     (uid,),
                 )
                 row = cur.fetchone()
+
                 if not row:
                     cur.execute(
-                        "INSERT INTO demo_accounts (user_id) VALUES (%s) RETURNING balance, closed_pnl, day_loss, market_symbol",
+                        """
+                        INSERT INTO demo_accounts (user_id)
+                        VALUES (%s)
+                        RETURNING balance, closed_pnl, day_loss, market_symbol
+                        """,
                         (uid,),
                     )
                     row = cur.fetchone()
                     conn.commit()
+
                 return jsonify(dict(row))
 
             data = request.get_json(silent=True) or {}
@@ -264,6 +304,7 @@ def account():
             closed_pnl = valid_number(data.get("closed_pnl", 0), "closed_pnl")
             day_loss = valid_number(data.get("day_loss", 0), "day_loss", 0)
             symbol = str(data.get("market_symbol", "EUR/USD"))
+
             if symbol not in MARKETS:
                 return jsonify({"error": "Unsupported market"}), 400
 
@@ -278,8 +319,10 @@ def account():
                     market_symbol = EXCLUDED.market_symbol,
                     updated_at = CURRENT_TIMESTAMP
             """, (uid, balance, closed_pnl, day_loss, symbol))
+
         conn.commit()
         return jsonify({"message": "Demo account saved"})
+
     except ValueError as exc:
         conn.rollback()
         return jsonify({"error": str(exc)}), 400
@@ -292,6 +335,7 @@ def trades():
     uid, error = require_login()
     if error:
         return error
+
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
@@ -299,14 +343,17 @@ def trades():
                 cur.execute("""
                     SELECT id, symbol, side, entry_price, stop_loss, target, quantity,
                            status, entry_time, exit_price, exit_time, pnl
-                    FROM trades WHERE user_id = %s
-                    ORDER BY entry_time DESC LIMIT 200
+                    FROM trades
+                    WHERE user_id = %s
+                    ORDER BY entry_time DESC
+                    LIMIT 200
                 """, (uid,))
                 return jsonify({"trades": [dict(row) for row in cur.fetchall()]})
 
             data = request.get_json(silent=True) or {}
             symbol = str(data.get("symbol", ""))
             side = str(data.get("side", "")).upper()
+
             if symbol not in MARKETS or side not in ("BUY", "SELL"):
                 return jsonify({"error": "Invalid symbol or side"}), 400
 
@@ -322,9 +369,12 @@ def trades():
                 RETURNING id, symbol, side, entry_price, stop_loss, target,
                           quantity, status, entry_time
             """, (uid, symbol, side, entry, stop, target, quantity))
+
             row = cur.fetchone()
+
         conn.commit()
         return jsonify({"trade": dict(row)}), 201
+
     except ValueError as exc:
         conn.rollback()
         return jsonify({"error": str(exc)}), 400
@@ -337,6 +387,7 @@ def close_trade(trade_id):
     uid, error = require_login()
     if error:
         return error
+
     data = request.get_json(silent=True) or {}
     try:
         exit_price = valid_number(data.get("exit_price"), "exit_price", 0.0000001)
@@ -348,15 +399,21 @@ def close_trade(trade_id):
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                UPDATE trades SET status = 'CLOSED', exit_price = %s,
-                    exit_time = CURRENT_TIMESTAMP, pnl = %s
+                UPDATE trades
+                SET status = 'CLOSED',
+                    exit_price = %s,
+                    exit_time = CURRENT_TIMESTAMP,
+                    pnl = %s
                 WHERE id = %s AND user_id = %s AND status = 'OPEN'
                 RETURNING id, status, exit_price, exit_time, pnl
             """, (exit_price, pnl, trade_id, uid))
+
             row = cur.fetchone()
+
         if not row:
             conn.rollback()
             return jsonify({"error": "Open trade not found"}), 404
+
         conn.commit()
         return jsonify({"trade": dict(row)})
     finally:
@@ -366,10 +423,13 @@ def close_trade(trade_id):
 def ema(values, period):
     if len(values) < period:
         return []
+
     multiplier = 2 / (period + 1)
     result = [sum(values[:period]) / period]
+
     for value in values[period:]:
         result.append((value - result[-1]) * multiplier + result[-1])
+
     return result
 
 
@@ -377,13 +437,16 @@ def calculate_rsi(prices):
     changes = [prices[i] - prices[i - 1] for i in range(1, len(prices))]
     if not changes:
         return 50.0
+
     recent = changes[-14:]
     gains = [max(value, 0) for value in recent]
     losses = [max(-value, 0) for value in recent]
     avg_gain = sum(gains) / len(recent)
     avg_loss = sum(losses) / len(recent)
+
     if avg_loss == 0:
         return 100.0 if avg_gain > 0 else 50.0
+
     return round(100 - (100 / (1 + avg_gain / avg_loss)), 2)
 
 
@@ -402,6 +465,7 @@ def fetch_one_minute_candles(symbol, outputsize=500):
         },
         timeout=20,
     )
+
     try:
         data = response.json()
     except ValueError:
@@ -422,13 +486,16 @@ def fetch_one_minute_candles(symbol, outputsize=500):
             "low": float(item["low"]),
             "close": float(item["close"]),
         })
+
     return rows
 
 
 def aggregate_candles(source_rows, minutes):
     grouped = {}
+
     for candle in source_rows:
         bucket = (candle["time"] // (minutes * 60)) * (minutes * 60)
+
         if bucket not in grouped:
             grouped[bucket] = {
                 "time": bucket,
@@ -441,6 +508,7 @@ def aggregate_candles(source_rows, minutes):
             grouped[bucket]["high"] = max(grouped[bucket]["high"], candle["high"])
             grouped[bucket]["low"] = min(grouped[bucket]["low"], candle["low"])
             grouped[bucket]["close"] = candle["close"]
+
     return sorted(grouped.values(), key=lambda row: row["time"])
 
 
@@ -448,6 +516,7 @@ def get_candles_cached(symbol, minutes):
     key = (symbol, minutes)
     now = time.time()
     cached = candle_cache.get(key)
+
     if cached and now - cached["time"] < CANDLE_CACHE_SECONDS:
         return cached["candles"]
 
@@ -460,6 +529,7 @@ def get_candles_cached(symbol, minutes):
 def analyse_market(symbol):
     rows = fetch_one_minute_candles(symbol, outputsize=100)
     prices = [row["close"] for row in rows]
+
     if len(prices) < 35:
         raise ValueError("Not enough price history")
 
@@ -468,21 +538,25 @@ def analyse_market(symbol):
     slow = ema(prices, 26)
     macd_line = [fast[i + 14] - slow[i] for i in range(len(slow))]
     signal_line = ema(macd_line, 9)
+
     if not signal_line:
         raise ValueError("MACD data unavailable")
 
     macd = macd_line[-1]
     signal = signal_line[-1]
+
     trade_signal = (
         "BUY" if macd > signal and 50 < rsi < 70
         else "SELL" if macd < signal and 30 < rsi < 50
         else "WAIT"
     )
+
     reason = (
         "Illustrative bullish indicator alignment" if trade_signal == "BUY"
         else "Illustrative bearish indicator alignment" if trade_signal == "SELL"
         else "No clear indicator alignment"
     )
+
     return {
         "symbol": symbol,
         "price": prices[-1],
@@ -502,24 +576,30 @@ def candles():
 
     symbol = request.args.get("symbol", "EUR/USD")
     timeframe = request.args.get("timeframe", "1")
+
     if symbol not in MARKETS:
         return jsonify({"error": "Unsupported market"}), 400
+
     try:
         minutes = int(timeframe)
     except (TypeError, ValueError):
         return jsonify({"error": "Timeframe must be a whole number from 1 to 10"}), 400
+
     if minutes < 1 or minutes > 10:
         return jsonify({"error": "Timeframe must be between 1 and 10 minutes"}), 400
 
     try:
         rows = get_candles_cached(symbol, minutes)
+
         if not rows:
             return jsonify({"error": "No candle data returned by provider"}), 502
+
         return jsonify({
             "symbol": symbol,
             "interval": f"{minutes}min",
             "candles": rows,
         })
+
     except Exception as exc:
         app.logger.exception("Candle request failed")
         return jsonify({"error": str(exc)}), 502
@@ -531,6 +611,7 @@ def scan():
         return jsonify({"error": "TWELVE_DATA_API_KEY is not configured"}), 500
 
     now = time.time()
+
     if scan_cache["results"] and now - scan_cache["time"] < SCAN_CACHE_SECONDS:
         return jsonify({
             "bot": "OWAISH AI TRADER",
@@ -539,6 +620,7 @@ def scan():
         })
 
     results = []
+
     for symbol in MARKETS:
         try:
             results.append(analyse_market(symbol))
@@ -553,6 +635,7 @@ def scan():
 
     scan_cache["time"] = now
     scan_cache["results"] = results
+
     return jsonify({
         "bot": "OWAISH AI TRADER",
         "mode": "DEMO_ONLY",
