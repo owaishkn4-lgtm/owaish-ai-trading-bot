@@ -130,8 +130,9 @@ function restoreState(){
   render();
   update();
 }
-
-function fmtINR(n){return '₹'+n.toFixed(2)}
+ 
+ 
+ function fmtINR(n){return '₹'+n.toFixed(2)}
 function priceDigits(){return price < 10 ? 5 : 2}
 
 function indicators(){
@@ -372,14 +373,18 @@ function reset(){
 $('start').onclick=start;
 $('pause').onclick=stop;
 $('reset').onclick=reset;
-$('capital').onchange=reset;
 
-$('sim-symbol').onchange=()=>{
- marketSymbol=$('sim-symbol').value;
- restoreState();
+$('capital').onchange=()=>{
+  saveState();
 };
 
-reset();
+$('sim-symbol').onchange=()=>{
+  marketSymbol=$('sim-symbol').value;
+  saveState();
+  update();
+};
+
+restoreState();
 </script>
  
 <!-- REAL LIVE CANDLE CHART -->
