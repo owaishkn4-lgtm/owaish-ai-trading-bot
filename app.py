@@ -1,6 +1,6 @@
 import os
 import time
-import secrets
+import calendar
 import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -10,7 +10,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY")
 if not app.secret_key:
-    raise RuntimeError("Set a strong SECRET_KEY environment variable in Render.")
+    raise RuntimeError("Set a fresh, strong SECRET_KEY environment variable in Render.")
 
 app.config.update(
     SESSION_COOKIE_SAMESITE="None",
@@ -20,17 +20,28 @@ app.config.update(
 )
 
 FRONTEND_ORIGIN = "https://owaish-ai-trading-bot.onrender.com"
-
 DATABASE_URL = os.getenv("DATABASE_URL")
+API_KEY = os.getenv("TWELVE_DATA_API_KEY")
+BASE_URL = "https://api.twelvedata.com/time_series"
+MARKETS = ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "BTC/USD", "ETH/USD"]
+
+candle_cache = {}
+scan_cache = {"time": 0, "results": []}
+CANDLE_CACHE_SECONDS = 10
+SCAN_CACHE_SECONDS = 60
+
 if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is not configured.")
+    raise RuntimeError("DATABASE_URL is not configured in Render.")
+
 
 def get_db_connection():
     return psycopg2.connect(
         DATABASE_URL,
         cursor_factory=RealDictCursor,
-        connect_timeout=10
+        connect_timeout=10,
+        sslmode="require",
     )
+
 
 def init_db():
     conn = get_db_connection()
@@ -72,19 +83,24 @@ def init_db():
                 )
             """)
         conn.commit()
-        print("Database tables ready!")
+        app.logger.info("Database tables ready.")
     finally:
         conn.close()
 
+
 init_db()
+
 
 def current_user_id():
     return session.get("user_id")
 
+
 def require_login():
-    if not current_user_id():
+    uid = current_user_id()
+    if not uid:
         return None, (jsonify({"error": "Login required"}), 401)
-    return current_user_id(), None
+    return uid, None
+
 
 def valid_number(value, field, minimum=None):
     try:
@@ -96,6 +112,7 @@ def valid_number(value, field, minimum=None):
     if minimum is not None and number < minimum:
         raise ValueError(f"{field} must be at least {minimum}")
     return number
+
 
 @app.after_request
 def add_security_headers(response):
@@ -110,9 +127,11 @@ def add_security_headers(response):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
 
+
 @app.route("/")
 def home():
     return "OWAISH AI TRADER API is running!"
+
 
 @app.route("/health")
 def health():
@@ -124,12 +143,12 @@ def health():
         app.logger.exception("Database health check failed")
         return jsonify({"status": "error", "database": "unavailable"}), 503
 
+
 @app.route("/api/register", methods=["POST"])
 def register():
     data = request.get_json(silent=True) or {}
     email = str(data.get("email", "")).strip().lower()
     password = data.get("password", "")
-
     if not email or "@" not in email or len(email) > 255:
         return jsonify({"error": "Enter a valid email"}), 400
     if not isinstance(password, str) or len(password) < 8:
@@ -140,12 +159,12 @@ def register():
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO users (email, password_hash) VALUES (%s, %s) RETURNING id, email",
-                (email, generate_password_hash(password))
+                (email, generate_password_hash(password)),
             )
             user = cur.fetchone()
             cur.execute(
                 "INSERT INTO demo_accounts (user_id, balance) VALUES (%s, 5000)",
-                (user["id"],)
+                (user["id"],),
             )
         conn.commit()
         session.clear()
@@ -157,6 +176,7 @@ def register():
         return jsonify({"error": "Email already registered"}), 409
     finally:
         conn.close()
+
 
 @app.route("/api/login", methods=["POST"])
 def login():
@@ -171,27 +191,32 @@ def login():
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, email, password_hash FROM users WHERE email = %s",
-                (email,)
+                (email,),
             )
             user = cur.fetchone()
             if not user or not check_password_hash(user["password_hash"], password):
                 return jsonify({"error": "Invalid email or password"}), 401
             cur.execute(
                 "INSERT INTO demo_accounts (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING",
-                (user["id"],)
+                (user["id"],),
             )
         conn.commit()
         session.clear()
         session.permanent = True
         session["user_id"] = user["id"]
-        return jsonify({"message": "Login successful", "user": {"id": user["id"], "email": user["email"]}})
+        return jsonify({
+            "message": "Login successful",
+            "user": {"id": user["id"], "email": user["email"]},
+        })
     finally:
         conn.close()
+
 
 @app.route("/api/logout", methods=["POST"])
 def logout():
     session.clear()
     return jsonify({"message": "Logout successful"})
+
 
 @app.route("/api/me")
 def me():
@@ -210,6 +235,7 @@ def me():
     finally:
         conn.close()
 
+
 @app.route("/api/account", methods=["GET", "PUT"])
 def account():
     uid, error = require_login()
@@ -221,11 +247,14 @@ def account():
             if request.method == "GET":
                 cur.execute(
                     "SELECT balance, closed_pnl, day_loss, market_symbol FROM demo_accounts WHERE user_id = %s",
-                    (uid,)
+                    (uid,),
                 )
                 row = cur.fetchone()
                 if not row:
-                    cur.execute("INSERT INTO demo_accounts (user_id) VALUES (%s) RETURNING balance, closed_pnl, day_loss, market_symbol", (uid,))
+                    cur.execute(
+                        "INSERT INTO demo_accounts (user_id) VALUES (%s) RETURNING balance, closed_pnl, day_loss, market_symbol",
+                        (uid,),
+                    )
                     row = cur.fetchone()
                     conn.commit()
                 return jsonify(dict(row))
@@ -237,24 +266,26 @@ def account():
             symbol = str(data.get("market_symbol", "EUR/USD"))
             if symbol not in MARKETS:
                 return jsonify({"error": "Unsupported market"}), 400
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO demo_accounts (user_id, balance, closed_pnl, day_loss, market_symbol, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (user_id) DO UPDATE SET
-                        balance = EXCLUDED.balance,
-                        closed_pnl = EXCLUDED.closed_pnl,
-                        day_loss = EXCLUDED.day_loss,
-                        market_symbol = EXCLUDED.market_symbol,
-                        updated_at = CURRENT_TIMESTAMP
-                """, (uid, balance, closed_pnl, day_loss, symbol))
-            conn.commit()
-            return jsonify({"message": "Demo account saved"})
+
+            cur.execute("""
+                INSERT INTO demo_accounts
+                    (user_id, balance, closed_pnl, day_loss, market_symbol, updated_at)
+                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    balance = EXCLUDED.balance,
+                    closed_pnl = EXCLUDED.closed_pnl,
+                    day_loss = EXCLUDED.day_loss,
+                    market_symbol = EXCLUDED.market_symbol,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (uid, balance, closed_pnl, day_loss, symbol))
+        conn.commit()
+        return jsonify({"message": "Demo account saved"})
     except ValueError as exc:
         conn.rollback()
         return jsonify({"error": str(exc)}), 400
     finally:
         conn.close()
+
 
 @app.route("/api/trades", methods=["GET", "POST"])
 def trades():
@@ -271,21 +302,25 @@ def trades():
                     FROM trades WHERE user_id = %s
                     ORDER BY entry_time DESC LIMIT 200
                 """, (uid,))
-                return jsonify({"trades": [dict(r) for r in cur.fetchall()]})
+                return jsonify({"trades": [dict(row) for row in cur.fetchall()]})
 
             data = request.get_json(silent=True) or {}
             symbol = str(data.get("symbol", ""))
             side = str(data.get("side", "")).upper()
             if symbol not in MARKETS or side not in ("BUY", "SELL"):
                 return jsonify({"error": "Invalid symbol or side"}), 400
+
             entry = valid_number(data.get("entry_price"), "entry_price", 0.0000001)
             stop = valid_number(data.get("stop_loss"), "stop_loss", 0.0000001)
             target = valid_number(data.get("target"), "target", 0.0000001)
             quantity = valid_number(data.get("quantity", 0), "quantity", 0)
+
             cur.execute("""
-                INSERT INTO trades (user_id, symbol, side, entry_price, stop_loss, target, quantity, status)
+                INSERT INTO trades
+                    (user_id, symbol, side, entry_price, stop_loss, target, quantity, status)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, 'OPEN')
-                RETURNING id, symbol, side, entry_price, stop_loss, target, quantity, status, entry_time
+                RETURNING id, symbol, side, entry_price, stop_loss, target,
+                          quantity, status, entry_time
             """, (uid, symbol, side, entry, stop, target, quantity))
             row = cur.fetchone()
         conn.commit()
@@ -295,6 +330,7 @@ def trades():
         return jsonify({"error": str(exc)}), 400
     finally:
         conn.close()
+
 
 @app.route("/api/trades/<int:trade_id>/close", methods=["POST"])
 def close_trade(trade_id):
@@ -326,10 +362,6 @@ def close_trade(trade_id):
     finally:
         conn.close()
 
-API_KEY = os.getenv("TWELVE_DATA_API_KEY")
-BASE_URL = "https://api.twelvedata.com/time_series"
-MARKETS = ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "BTC/USD", "ETH/USD"]
-cache = {"time": 0, "results": []}
 
 def ema(values, period):
     if len(values) < period:
@@ -340,79 +372,193 @@ def ema(values, period):
         result.append((value - result[-1]) * multiplier + result[-1])
     return result
 
+
 def calculate_rsi(prices):
     changes = [prices[i] - prices[i - 1] for i in range(1, len(prices))]
-    gains = [max(x, 0) for x in changes]
-    losses = [max(-x, 0) for x in changes]
-    avg_gain = sum(gains[-14:]) / 14
-    avg_loss = sum(losses[-14:]) / 14
+    if not changes:
+        return 50.0
+    recent = changes[-14:]
+    gains = [max(value, 0) for value in recent]
+    losses = [max(-value, 0) for value in recent]
+    avg_gain = sum(gains) / len(recent)
+    avg_loss = sum(losses) / len(recent)
     if avg_loss == 0:
-        return 100 if avg_gain > 0 else 50
+        return 100.0 if avg_gain > 0 else 50.0
     return round(100 - (100 / (1 + avg_gain / avg_loss)), 2)
 
-def analyse_market(symbol):
-    response = requests.get(BASE_URL, params={
-        "symbol": symbol, "interval": "5min", "outputsize": 60, "apikey": API_KEY
-    }, timeout=20)
-    data = response.json()
+
+def fetch_one_minute_candles(symbol, outputsize=500):
+    if not API_KEY:
+        raise RuntimeError("TWELVE_DATA_API_KEY is not configured in Render.")
+
+    response = requests.get(
+        BASE_URL,
+        params={
+            "symbol": symbol,
+            "interval": "1min",
+            "outputsize": outputsize,
+            "timezone": "UTC",
+            "apikey": API_KEY,
+        },
+        timeout=20,
+    )
+    try:
+        data = response.json()
+    except ValueError:
+        raise RuntimeError("Market-data provider returned an unreadable response.")
+
     if not response.ok or "values" not in data:
-        return {"symbol": symbol, "status": "unavailable", "message": data.get("message", "Market data unavailable")}
-    prices = [float(item["close"]) for item in reversed(data["values"])]
+        message = data.get("message") or data.get("code") or "Market data unavailable"
+        raise RuntimeError(str(message))
+
+    rows = []
+    for item in reversed(data["values"]):
+        parsed = time.strptime(item["datetime"], "%Y-%m-%d %H:%M:%S")
+        timestamp = calendar.timegm(parsed)
+        rows.append({
+            "time": timestamp,
+            "open": float(item["open"]),
+            "high": float(item["high"]),
+            "low": float(item["low"]),
+            "close": float(item["close"]),
+        })
+    return rows
+
+
+def aggregate_candles(source_rows, minutes):
+    grouped = {}
+    for candle in source_rows:
+        bucket = (candle["time"] // (minutes * 60)) * (minutes * 60)
+        if bucket not in grouped:
+            grouped[bucket] = {
+                "time": bucket,
+                "open": candle["open"],
+                "high": candle["high"],
+                "low": candle["low"],
+                "close": candle["close"],
+            }
+        else:
+            grouped[bucket]["high"] = max(grouped[bucket]["high"], candle["high"])
+            grouped[bucket]["low"] = min(grouped[bucket]["low"], candle["low"])
+            grouped[bucket]["close"] = candle["close"]
+    return sorted(grouped.values(), key=lambda row: row["time"])
+
+
+def get_candles_cached(symbol, minutes):
+    key = (symbol, minutes)
+    now = time.time()
+    cached = candle_cache.get(key)
+    if cached and now - cached["time"] < CANDLE_CACHE_SECONDS:
+        return cached["candles"]
+
+    source = fetch_one_minute_candles(symbol, outputsize=500)
+    result = aggregate_candles(source, minutes)
+    candle_cache[key] = {"time": now, "candles": result}
+    return result
+
+
+def analyse_market(symbol):
+    rows = fetch_one_minute_candles(symbol, outputsize=100)
+    prices = [row["close"] for row in rows]
     if len(prices) < 35:
         raise ValueError("Not enough price history")
+
     rsi = calculate_rsi(prices)
-    fast, slow = ema(prices, 12), ema(prices, 26)
+    fast = ema(prices, 12)
+    slow = ema(prices, 26)
     macd_line = [fast[i + 14] - slow[i] for i in range(len(slow))]
     signal_line = ema(macd_line, 9)
     if not signal_line:
         raise ValueError("MACD data unavailable")
-    macd, signal = macd_line[-1], signal_line[-1]
-    macd_direction = 1 if macd > signal else -1 if macd < signal else 0
-    rsi_direction = 1 if rsi > 50 else -1 if rsi < 50 else 0
-    agreement = 50 if macd_direction == 0 or rsi_direction == 0 else (100 if macd_direction == rsi_direction else 0)
-    trade_signal = "BUY" if macd > signal and 50 < rsi < 70 else "SELL" if macd < signal and 30 < rsi < 50 else "WAIT"
-    reason = "MACD bullish crossover with RSI in bullish range" if trade_signal == "BUY" else "MACD bearish crossover with RSI in bearish range" if trade_signal == "SELL" else "No clear confirmation from RSI and MACD"
-    return {"symbol": symbol, "price": prices[-1], "rsi": rsi, "macd": round(macd, 6),
-            "macd_signal": round(signal, 6), "signal": trade_signal, "reason": reason,
-            "agreement_score": agreement, "status": "success"}
+
+    macd = macd_line[-1]
+    signal = signal_line[-1]
+    trade_signal = (
+        "BUY" if macd > signal and 50 < rsi < 70
+        else "SELL" if macd < signal and 30 < rsi < 50
+        else "WAIT"
+    )
+    reason = (
+        "Illustrative bullish indicator alignment" if trade_signal == "BUY"
+        else "Illustrative bearish indicator alignment" if trade_signal == "SELL"
+        else "No clear indicator alignment"
+    )
+    return {
+        "symbol": symbol,
+        "price": prices[-1],
+        "rsi": rsi,
+        "macd": round(macd, 8),
+        "macd_signal": round(signal, 8),
+        "signal": trade_signal,
+        "reason": reason,
+        "status": "success",
+    }
+
 
 @app.route("/api/candles")
 def candles():
     if not API_KEY:
-        return jsonify({"error": "API key not configured"}), 500
+        return jsonify({"error": "TWELVE_DATA_API_KEY is not configured"}), 500
+
     symbol = request.args.get("symbol", "EUR/USD")
+    timeframe = request.args.get("timeframe", "1")
     if symbol not in MARKETS:
         return jsonify({"error": "Unsupported market"}), 400
     try:
-        response = requests.get(BASE_URL, params={
-            "symbol": symbol, "interval": "5min", "outputsize": 60, "apikey": API_KEY
-        }, timeout=20)
-        data = response.json()
-        if not response.ok or "values" not in data:
-            return jsonify({"error": data.get("message", "Market data unavailable")}), 502
-        candles_data = [{
-            "time": item["datetime"], "open": float(item["open"]),
-            "high": float(item["high"]), "low": float(item["low"]), "close": float(item["close"])
-        } for item in reversed(data["values"])]
-        return jsonify({"symbol": symbol, "interval": "5min", "candles": candles_data})
-    except Exception:
+        minutes = int(timeframe)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Timeframe must be a whole number from 1 to 10"}), 400
+    if minutes < 1 or minutes > 10:
+        return jsonify({"error": "Timeframe must be between 1 and 10 minutes"}), 400
+
+    try:
+        rows = get_candles_cached(symbol, minutes)
+        if not rows:
+            return jsonify({"error": "No candle data returned by provider"}), 502
+        return jsonify({
+            "symbol": symbol,
+            "interval": f"{minutes}min",
+            "candles": rows,
+        })
+    except Exception as exc:
         app.logger.exception("Candle request failed")
-        return jsonify({"error": "Unable to fetch candles"}), 500
+        return jsonify({"error": str(exc)}), 502
+
 
 @app.route("/api/scan")
 def scan():
     if not API_KEY:
-        return jsonify({"error": "API key not configured"}), 500
-    if time.time() - cache["time"] < 300 and cache["results"]:
-        return jsonify({"bot": "OWAISH AI TRADER", "mode": "DEMO_ONLY", "markets": cache["results"]})
+        return jsonify({"error": "TWELVE_DATA_API_KEY is not configured"}), 500
+
+    now = time.time()
+    if scan_cache["results"] and now - scan_cache["time"] < SCAN_CACHE_SECONDS:
+        return jsonify({
+            "bot": "OWAISH AI TRADER",
+            "mode": "DEMO_ONLY",
+            "markets": scan_cache["results"],
+        })
+
     results = []
     for symbol in MARKETS:
         try:
             results.append(analyse_market(symbol))
         except Exception as exc:
-            results.append({"symbol": symbol, "status": "error", "message": str(exc)})
-    cache["time"], cache["results"] = time.time(), results
-    return jsonify({"bot": "OWAISH AI TRADER", "mode": "DEMO_ONLY", "markets": results})
+            app.logger.warning("Analysis unavailable for %s: %s", symbol, exc)
+            results.append({
+                "symbol": symbol,
+                "status": "unavailable",
+                "signal": "WAIT",
+                "message": str(exc),
+            })
+
+    scan_cache["time"] = now
+    scan_cache["results"] = results
+    return jsonify({
+        "bot": "OWAISH AI TRADER",
+        "mode": "DEMO_ONLY",
+        "markets": results,
+    })
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
