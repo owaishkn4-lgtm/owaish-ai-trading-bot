@@ -60,8 +60,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;p
 <div class="grid" style="margin-top:12px">
 <div><div class="label">Selected market price</div><div id="price" class="metric">Loading...</div></div>
 <div><div class="label">Strategy signal</div><div id="signal" class="signal">WAIT</div></div>
-<div><div class="label">RSI (illustrative)</div><div id="rsi" class="metric">50.0</div></div>
-<div><div class="label">MACD (illustrative)</div><div id="macd" class="metric">0.0000</div></div>
+<div><div class="label">RSI (backend)</div><div id="rsi" class="metric">50.0</div></div>
+<div><div class="label">MACD (backend)</div><div id="macd" class="metric">0.0000</div></div>
 </div>
 <div class="controls"><button class="primary" id="start">Start simulation</button><button id="pause" disabled>Pause</button><button class="stop" id="reset">Reset demo</button></div>
 </section>
@@ -78,10 +78,16 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;p
 <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 <script>
 const $=id=>document.getElementById(id),API_BASE='https://owaish-ai-trading-api.onrender.com';
-let balance=5000,price=1.085,prices=[],running=false,timer=null,positions=[],history=[],closedPnl=0,dayLoss=0,lastTradeSignal='WAIT',marketSymbol='EUR/USD',currentUser=null,cloudBusy=false,liveChart=null,candleSeries=null,chartTimer=null,chartHasInitialFit=false;
+let balance=5000,price=1.085,prices=[],running=false,timer=null,positions=[],history=[],closedPnl=0,dayLoss=0,lastTradeSignal='WAIT',marketSymbol='EUR/USD',currentUser=null,cloudBusy=false,liveChart=null,candleSeries=null,chartTimer=null,chartHasInitialFit=false,fetching=false;
 const STORAGE_KEY='owaish_ai_trader_demo_v2';
 function selectedTimeframe(){return Number($('chart-timeframe')?.value||1);}
-async function api(path,options={}){const r=await fetch(API_BASE+path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Request failed ('+r.status+')');return d;}
+async function api(path,options={}){
+  const {headers={},...rest}=options;
+  const r=await fetch(API_BASE+path,{...rest,credentials:'include',headers:{'Content-Type':'application/json',...headers}});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){const err=new Error(d.error||'Request failed ('+r.status+')');err.status=r.status;throw err;}
+  return d;
+}
 function showAuth(msg=''){$('auth-screen').style.display='block';$('dashboard').style.display='none';$('auth-message').textContent=msg;stop();if(chartTimer)clearInterval(chartTimer);}
 function initChart(){if(liveChart||!window.LightweightCharts)return;const el=$('live-candles');liveChart=LightweightCharts.createChart(el,{width:el.clientWidth,height:el.clientHeight,layout:{background:{color:'#121d30'},textColor:'#edf4ff'},grid:{vertLines:{color:'#26364f'},horzLines:{color:'#26364f'}},timeScale:{timeVisible:true}});candleSeries=liveChart.addSeries(LightweightCharts.CandlestickSeries,{upColor:'#2bd39b',downColor:'#ff6878',borderVisible:false,wickUpColor:'#2bd39b',wickDownColor:'#ff6878'});window.addEventListener('resize',()=>{if(liveChart)liveChart.applyOptions({width:el.clientWidth});});}
 function showDashboard(user){currentUser=user;$('auth-screen').style.display='none';$('dashboard').style.display='block';$('signed-in-as').textContent='Signed in: '+(user.email||'Demo user');initChart();loadLiveCandles();loadMarketPrices();if(chartTimer)clearInterval(chartTimer);chartTimer=setInterval(loadLiveCandles,15000);}
@@ -116,33 +122,69 @@ async function loadCloudState(){
 async function saveCloudAccount(){if(!currentUser||cloudBusy)return;cloudBusy=true;try{await api('/api/account',{method:'PUT',body:JSON.stringify({balance,closed_pnl:closedPnl,day_loss:dayLoss,market_symbol:marketSymbol})});}catch(e){console.error('Account save failed:',e);}finally{cloudBusy=false;}}
 function saveState(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify({capital:$('capital').value,risk:$('risk').value,daily:$('daily').value,limit:$('limit').value}));}catch(e){}if(currentUser)saveCloudAccount();}
 function fmt(n){return '₹'+Number(n||0).toFixed(2)}function digits(){return price<10?5:2;}
-function indicatorValues(){const d=prices.slice(1).map((v,i)=>v-prices[i]),up=d.filter(x=>x>0).reduce((a,b)=>a+b,0),dn=-d.filter(x=>x<0).reduce((a,b)=>a+b,0),rsi=d.length?(dn===0?70:100-100/(1+up/(dn||1e-9))):50,fast=prices.slice(-5).reduce((a,b)=>a+b,0)/Math.max(1,Math.min(5,prices.length)),slow=prices.slice(-12).reduce((a,b)=>a+b,0)/Math.max(1,Math.min(12,prices.length));return{rsi,macd:fast-slow};}
 async function loadLiveCandles(){if(!$('dashboard')||$('dashboard').style.display==='none')return;try{const s=$('chart-symbol').value,tf=selectedTimeframe(),r=await fetch(API_BASE+'/api/candles?symbol='+encodeURIComponent(s)+'&timeframe='+tf);if(!r.ok)throw Error('Feed unavailable');const d=await r.json();const rows=(d.candles||[]).map(c=>({time:Number(c.time),open:Number(c.open),high:Number(c.high),low:Number(c.low),close:Number(c.close)})).filter(c=>Number.isFinite(c.time)&&Number.isFinite(c.open)&&Number.isFinite(c.high)&&Number.isFinite(c.low)&&Number.isFinite(c.close)).sort((a,b)=>a.time-b.time);if(!rows.length)throw Error('No candle data');initChart();if(!candleSeries)throw Error('Chart library unavailable');candleSeries.setData(rows);if(!chartHasInitialFit){liveChart.timeScale().fitContent();chartHasInitialFit=true;}$('chart-status').textContent=s+' · '+tf+'m candles · '+rows.length+' candles · refreshes every 15 sec';}catch(e){$('chart-status').textContent='Chart unavailable: '+e.message;}}
 $('chart-symbol').onchange=()=>{chartHasInitialFit=false;loadLiveCandles();};
 $('chart-timeframe').onchange=()=>{chartHasInitialFit=false;loadLiveCandles();};
+$('sim-symbol').onchange=async()=>{marketSymbol=$('sim-symbol').value;$('chart-symbol').value=marketSymbol;chartHasInitialFit=false;lastTradeSignal='WAIT';await saveCloudAccount();loadLiveCandles();loadMarketPrices();update();};
 async function loadMarketPrices(){if($('dashboard').style.display==='none')return;try{$('market-status').textContent='Fetching analysis...';const r=await fetch(API_BASE+'/api/scan');if(!r.ok)throw Error('Analysis unavailable');const d=await r.json();$('market-prices').innerHTML=(d.markets||[]).map(m=>`<div class="market-item"><b>${m.symbol}</b><p>Price: ${m.price??'Unavailable'} · RSI: ${m.rsi??'N/A'} · MACD: ${m.macd??'N/A'}</p><p class="${m.signal==='BUY'?'green':m.signal==='SELL'?'red':''}">Signal: <b>${m.signal??'WAIT'}</b></p><p class="muted">${m.reason??'Illustrative signal only'}</p></div>`).join('')||'No analysis data.';$('market-status').textContent='Demo analysis connected';}catch(e){$('market-status').textContent='Analysis unavailable. Retry shortly.';}}
-async function update(){if(fetching||!currentUser)return;fetching=true;try{const tf=selectedTimeframe(),r=await fetch(API_BASE+'/api/candles?symbol='+encodeURIComponent(marketSymbol)+'&timeframe='+tf);if(!r.ok)throw Error('Price feed unavailable');const d=await r.json();if(!d.candles?.length)throw Error('No candle data');prices=d.candles.map(c=>Number(c.close)).filter(Number.isFinite).slice(-40);price=prices[prices.length-1];$('price').textContent=price.toFixed(digits());const v=indicatorValues();$('rsi').textContent=v.rsi.toFixed(1);$('macd').textContent=v.macd.toFixed(digits());const sr=await fetch(API_BASE+'/api/scan');if(!sr.ok)throw Error('Analysis unavailable');const sd=await sr.json(),m=(sd.markets||[]).find(x=>x.symbol===marketSymbol),sig=m&&m.status==='success'?m.signal:'WAIT';$('signal').textContent=sig;$('signal').className='signal '+(sig==='BUY'?'green':sig==='SELL'?'red':'');if(running&&sig!=='WAIT'&&sig!==lastTradeSignal&&positions.length<Number($('limit').value)){openPosition(sig);lastTradeSignal=sig;}else if(sig==='WAIT')lastTradeSignal='WAIT';render();}catch(e){$('signal').textContent='DATA UNAVAILABLE';console.error(e);}finally{fetching=false;}}
-async function openPosition(side){const risk=Number($('capital').value)*Number($('risk').value),dist=price*.001,p={id:Date.now(),side,entry:price,stop:side==='BUY'?price-dist:price+dist,target:side==='BUY'?price+dist*1.5:price-dist*1.5,risk,at:new Date().toLocaleString('en-IN')};positions.push(p);render();try{const d=await api('/api/trades',{method:'POST',body:JSON.stringify({symbol:marketSymbol,side,entry_price:p.entry,stop_loss:p.stop,target:p.target,quantity:risk})});p.id=Number(d.trade.id);p.cloudId=p.id;render();}catch(e){console.error('Demo trade save failed:',e);}}
-async function closeTrade(id){const i=positions.findIndex(p=>p.id===id);if(i<0)return;const p=positions[i],move=p.side==='BUY'?price-p.entry:p.entry-price,pl=move/(p.entry*.001)*p.risk;if(p.cloudId){try{await api('/api/trades/'+p.cloudId+'/close',{method:'POST',body:JSON.stringify({exit_price:price,pnl:pl})});}catch(e){console.error(e);return;}}balance+=pl;closedPnl+=pl;if(pl<0)dayLoss+=Math.abs(pl);history.unshift({time:new Date().toLocaleString('en-IN'),side:p.side,entry:p.entry,exit:price,pl});positions.splice(i,1);render();}
+async function update(){
+  if(fetching||!currentUser)return;
+  fetching=true;
+  try{
+    const sr=await fetch(API_BASE+'/api/scan');
+    if(!sr.ok)throw Error('Analysis unavailable');
+    const sd=await sr.json(),m=(sd.markets||[]).find(x=>x.symbol===marketSymbol);
+    if(!m||m.status!=='success')throw Error('Selected market data unavailable');
+    price=Number(m.price);
+    if(!Number.isFinite(price)||price<=0)throw Error('Invalid market price');
+    $('price').textContent=price.toFixed(digits());
+    $('rsi').textContent=Number(m.rsi).toFixed(1);
+    $('macd').textContent=Number(m.macd).toFixed(4);
+    const sig=m.signal||'WAIT';
+    $('signal').textContent=sig;
+    $('signal').className='signal '+(sig==='BUY'?'green':sig==='SELL'?'red':'');
+    if(running&&sig!=='WAIT'&&sig!==lastTradeSignal&&positions.length<Number($('limit').value)){await openPosition(sig);lastTradeSignal=sig;}
+    else if(sig==='WAIT')lastTradeSignal='WAIT';
+    render();
+  }catch(e){$('signal').textContent='DATA UNAVAILABLE';console.error(e);}
+  finally{fetching=false;}
+}
+async function openPosition(side){
+  const risk=Number($('capital').value)*Number($('risk').value),dist=price*.001,p={id:Date.now(),side,entry:price,stop:side==='BUY'?price-dist:price+dist,target:side==='BUY'?price+dist*1.5:price-dist*1.5,risk,at:new Date().toLocaleString('en-IN')};
+  try{
+    const d=await api('/api/trades',{method:'POST',body:JSON.stringify({symbol:marketSymbol,side,entry_price:p.entry,stop_loss:p.stop,target:p.target,quantity:risk})});
+    p.id=Number(d.trade.id);p.cloudId=p.id;positions.push(p);render();
+  }catch(e){console.error('Demo trade save failed:',e);$('market-status').textContent='Trade was not saved. No position was opened.';}
+}
+async function closeTrade(id){const i=positions.findIndex(p=>p.id===id);if(i<0)return;const p=positions[i],move=p.side==='BUY'?price-p.entry:p.entry-price,pl=move/(p.entry*.001)*p.risk;if(p.cloudId){try{await api('/api/trades/'+p.cloudId+'/close',{method:'POST',body:JSON.stringify({exit_price:price,pnl:pl})});}catch(e){console.error(e);$('market-status').textContent='Could not save trade closure. Position remains open.';return;}}balance+=pl;closedPnl+=pl;if(pl<0)dayLoss+=Math.abs(pl);history.unshift({time:new Date().toLocaleString('en-IN'),side:p.side,entry:p.entry,exit:price,pl});positions.splice(i,1);render();}
 function render(){const floating=positions.reduce((s,p)=>s+((p.side==='BUY'?price-p.entry:p.entry-price)/(p.entry*.001))*p.risk,0),total=closedPnl+floating;$('balance').textContent=fmt(balance);$('equity').textContent=fmt(balance+floating);$('pnl').textContent=fmt(total);$('pnl').className='metric '+(total>=0?'green':'red');$('open').textContent=positions.length;$('open-trades').innerHTML=positions.length?positions.map(p=>`<div class="market-item"><b class="${p.side==='BUY'?'green':'red'}">${p.side}</b><p>Entry: ${p.entry.toFixed(digits())} · Stop: ${p.stop.toFixed(digits())} · Target: ${p.target.toFixed(digits())}</p><button class="stop" onclick="closeTrade(${p.id})">Close demo position</button></div>`).join(''):'<p class="muted">No open positions yet.</p>';$('history').innerHTML=history.length?history.map(h=>`<tr><td>${h.time}</td><td>${h.side}</td><td>${Number(h.entry).toFixed(digits())}</td><td>${Number(h.exit).toFixed(digits())}</td><td class="${h.pl>=0?'green':'red'}">${fmt(h.pl)}</td></tr>`).join(''):'<tr><td colspan="5" class="muted">No simulated trades yet.</td></tr>';saveState();}
 function start(){if(running)return;running=true;$('start').disabled=true;$('pause').disabled=false;update();timer=setInterval(update,15000);}
 function stop(){running=false;clearInterval(timer);timer=null;if($('start')){$('start').disabled=false;$('pause').disabled=true;}}
-function reset(){stop();balance=Number($('capital').value);positions=[];history=[];closedPnl=0;dayLoss=0;lastTradeSignal='WAIT';render();update();}
+async function reset(){
+  stop();
+  if(positions.length||history.length){
+    $('market-status').textContent='Reset paused: close open positions first. Saved trade history is kept and cannot be erased by this button.';
+    return;
+  }
+  balance=Number($('capital').value);closedPnl=0;dayLoss=0;lastTradeSignal='WAIT';
+  await saveCloudAccount();render();update();
+}
 $('start').onclick=start;$('pause').onclick=stop;$('reset').onclick=reset;
 ['capital','risk','daily','limit'].forEach(id=>$(id).onchange=saveState);
 
-// Restore UI preferences, then verify the server session. A cloud-data failure
-// must NOT sign the user out; only a failed /api/me check shows the login screen.
+// Restore preferences and verify the server session. Only a confirmed 401 means
+// the session is absent; network/server errors are reported without claiming logout.
 try{const saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');if(saved.capital)$('capital').value=saved.capital;if(saved.risk)$('risk').value=saved.risk;if(saved.daily)$('daily').value=saved.daily;if(saved.limit)$('limit').value=saved.limit;}catch(e){}
 (async()=>{
   try{
     const d=await api('/api/me');
-    if(!d.user)throw Error('No active session');
+    if(!d.user)throw Object.assign(new Error('No active session'),{status:401});
     showDashboard(d.user);
     await loadCloudState();
   }catch(e){
     console.warn('Session check:',e);
-    showAuth('Please login or create a demo account.');
+    if(e.status===401)showAuth('Please login or create a demo account.');
+    else showAuth('Session verify nahi ho paaya. Internet/backend check karke refresh karo; abhi dobara register mat karo.');
   }
 })();
 </script>
