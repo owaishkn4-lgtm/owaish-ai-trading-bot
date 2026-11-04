@@ -31,12 +31,21 @@ BASE_URL = "https://api.twelvedata.com/time_series"
 PRICE_URL = "https://api.twelvedata.com/price"
 MARKETS = ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "BTC/USD", "ETH/USD"]
 
+# One shared candle cache is used by both /api/scan and /api/candles.
+# This avoids making a second provider request when the chart asks for data
+# that the market scanner has already downloaded.
 candle_cache = {}
 live_price_cache = {}
 scan_cache = {"time": 0, "results": []}
-CANDLE_CACHE_SECONDS = 10
-LIVE_PRICE_CACHE_SECONDS = 5
-SCAN_CACHE_SECONDS = 10
+last_successful_market_data = {}
+
+# Basic 8 plan: six candle requests plus one EUR/USD quote per scan cycle.
+# The 5-minute cache prevents the frontend's frequent polling from repeatedly
+# consuming provider credits. Chart requests reuse the same candle cache.
+CANDLE_CACHE_SECONDS = 300
+LIVE_PRICE_CACHE_SECONDS = 300
+SCAN_CACHE_SECONDS = 300
+CANDLE_OUTPUTSIZE = 500
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not configured in Render.")
@@ -453,30 +462,47 @@ def calculate_rsi(prices):
     return round(100 - (100 / (1 + avg_gain / avg_loss)), 2)
 
 
-def fetch_one_minute_candles(symbol, outputsize=500):
+def _provider_json(url, params, timeout=20):
+    """Call Twelve Data and convert provider/API errors into readable errors."""
     if not API_KEY:
         raise RuntimeError("TWELVE_DATA_API_KEY is not configured in Render.")
 
-    response = requests.get(
-        BASE_URL,
-        params={
-            "symbol": symbol,
-            "interval": "1min",
-            "outputsize": outputsize,
-            "timezone": "UTC",
-            "apikey": API_KEY,
-        },
-        timeout=20,
-    )
+    response = requests.get(url, params=params, timeout=timeout)
 
     try:
         data = response.json()
     except ValueError:
         raise RuntimeError("Market-data provider returned an unreadable response.")
 
-    if not response.ok or "values" not in data:
+    if not response.ok or "code" in data or "status" in data and data.get("status") == "error":
         message = data.get("message") or data.get("code") or "Market data unavailable"
         raise RuntimeError(str(message))
+
+    return data
+
+
+def fetch_one_minute_candles(symbol, outputsize=CANDLE_OUTPUTSIZE):
+    """Return cached 1-minute candles; scan and chart share this cache."""
+    now = time.time()
+    cached = candle_cache.get(symbol)
+
+    if cached and now - cached["time"] < CANDLE_CACHE_SECONDS:
+        return cached["candles"]
+
+    data = _provider_json(
+        BASE_URL,
+        {
+            "symbol": symbol,
+            "interval": "1min",
+            "outputsize": max(outputsize, CANDLE_OUTPUTSIZE),
+            "timezone": "UTC",
+            "apikey": API_KEY,
+        },
+        timeout=20,
+    )
+
+    if "values" not in data:
+        raise RuntimeError(data.get("message", "Market data unavailable"))
 
     rows = []
     for item in reversed(data["values"]):
@@ -490,33 +516,29 @@ def fetch_one_minute_candles(symbol, outputsize=500):
             "close": float(item["close"]),
         })
 
+    if not rows:
+        raise RuntimeError("No candle data returned by provider")
+
+    candle_cache[symbol] = {"time": now, "candles": rows}
     return rows
 
 
 def fetch_live_price(symbol):
-    """Fetch a current quote, caching it briefly to limit provider API usage."""
-    if not API_KEY:
-        raise RuntimeError("TWELVE_DATA_API_KEY is not configured in Render.")
-
+    """Fetch a quote, using a 5-minute cache to protect the Basic plan."""
     now = time.time()
     cached = live_price_cache.get(symbol)
+
     if cached and now - cached["time"] < LIVE_PRICE_CACHE_SECONDS:
         return cached["price"]
 
-    response = requests.get(
+    data = _provider_json(
         PRICE_URL,
-        params={"symbol": symbol, "apikey": API_KEY},
+        {"symbol": symbol, "apikey": API_KEY},
         timeout=10,
     )
 
-    try:
-        data = response.json()
-    except ValueError:
-        raise RuntimeError("Live-price provider returned an unreadable response.")
-
-    if not response.ok or "price" not in data:
-        message = data.get("message") or data.get("code") or "Live price unavailable"
-        raise RuntimeError(str(message))
+    if "price" not in data:
+        raise RuntimeError(data.get("message", "Live price unavailable"))
 
     live_price = float(data["price"])
     if not (live_price > 0 and live_price < float("inf")):
@@ -549,26 +571,19 @@ def aggregate_candles(source_rows, minutes):
 
 
 def get_candles_cached(symbol, minutes):
-    key = (symbol, minutes)
-    now = time.time()
-    cached = candle_cache.get(key)
-
-    if cached and now - cached["time"] < CANDLE_CACHE_SECONDS:
-        return cached["candles"]
-
-    source = fetch_one_minute_candles(symbol, outputsize=500)
-    result = aggregate_candles(source, minutes)
-    candle_cache[key] = {"time": now, "candles": result}
-    return result
+    # Candle data is already cached per symbol by fetch_one_minute_candles().
+    source = fetch_one_minute_candles(symbol, outputsize=CANDLE_OUTPUTSIZE)
+    return aggregate_candles(source, minutes)
 
 
 def analyse_market(symbol):
-    rows = fetch_one_minute_candles(symbol, outputsize=100)
+    rows = fetch_one_minute_candles(symbol, outputsize=CANDLE_OUTPUTSIZE)
     prices = [row["close"] for row in rows]
 
     if len(prices) < 35:
         raise ValueError("Not enough price history")
 
+    # Indicators use historical 1-minute candle closes.
     rsi = calculate_rsi(prices)
     fast = ema(prices, 12)
     slow = ema(prices, 26)
@@ -593,7 +608,7 @@ def analyse_market(symbol):
         else "No clear indicator alignment"
     )
 
-    # Use a live quote for EUR/USD; indicators still use historical 1-minute candles.
+    # EUR/USD uses the quote endpoint. Other symbols use the latest candle close.
     current_price = fetch_live_price(symbol) if symbol == "EUR/USD" else prices[-1]
 
     return {
@@ -630,7 +645,6 @@ def candles():
 
     try:
         rows = get_candles_cached(symbol, minutes)
-
         if not rows:
             return jsonify({"error": "No candle data returned by provider"}), 502
 
@@ -638,10 +652,22 @@ def candles():
             "symbol": symbol,
             "interval": f"{minutes}min",
             "candles": rows,
+            "data_source": "cached_1min_candles",
         })
 
     except Exception as exc:
         app.logger.exception("Candle request failed")
+        old = candle_cache.get(symbol)
+        if old:
+            stale_rows = aggregate_candles(old["candles"], minutes)
+            return jsonify({
+                "symbol": symbol,
+                "interval": f"{minutes}min",
+                "candles": stale_rows,
+                "status": "stale",
+                "message": "Provider unavailable. Showing cached candles.",
+            })
+
         return jsonify({"error": str(exc)}), 502
 
 
@@ -652,27 +678,48 @@ def scan():
 
     now = time.time()
 
+    # Frequent frontend polling returns this cached result without provider calls.
     if scan_cache["results"] and now - scan_cache["time"] < SCAN_CACHE_SECONDS:
         return jsonify({
             "bot": "OWAISH AI TRADER",
             "mode": "DEMO_ONLY",
             "markets": scan_cache["results"],
+            "cache_age_seconds": int(now - scan_cache["time"]),
         })
 
     results = []
 
     for symbol in MARKETS:
         try:
-            results.append(analyse_market(symbol))
+            market_data = analyse_market(symbol)
+            last_successful_market_data[symbol] = {
+                "data": dict(market_data),
+                "time": now,
+            }
+            results.append(market_data)
+
         except Exception as exc:
             app.logger.warning("Analysis unavailable for %s: %s", symbol, exc)
-            results.append({
-                "symbol": symbol,
-                "status": "unavailable",
-                "signal": "WAIT",
-                "message": str(exc),
-            })
+            previous = last_successful_market_data.get(symbol)
 
+            if previous:
+                stale_data = dict(previous["data"])
+                stale_data["status"] = "stale"
+                stale_data["data_age_seconds"] = int(now - previous["time"])
+                stale_data["message"] = (
+                    "Provider unavailable. Showing last successful data."
+                )
+                results.append(stale_data)
+            else:
+                results.append({
+                    "symbol": symbol,
+                    "status": "unavailable",
+                    "signal": "WAIT",
+                    "message": str(exc),
+                })
+
+    # Cache both fresh and stale/unavailable results to avoid repeatedly
+    # hitting the provider during an outage or after credits are exhausted.
     scan_cache["time"] = now
     scan_cache["results"] = results
 
@@ -680,6 +727,7 @@ def scan():
         "bot": "OWAISH AI TRADER",
         "mode": "DEMO_ONLY",
         "markets": results,
+        "cache_age_seconds": 0,
     })
 
 
